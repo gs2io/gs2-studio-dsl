@@ -345,7 +345,8 @@ declare const COMPARISON_OPS: {
 	has(value: unknown): value is "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
 };
 type ComparisonOp = (typeof COMPARISON_OPS.kinds)[number];
-type OrderingComparisonOp = Exclude<ComparisonOp, "eq" | "neq">;
+type EqualityComparisonOp = Extract<ComparisonOp, "eq" | "neq">;
+type OrderingComparisonOp = Exclude<ComparisonOp, EqualityComparisonOp>;
 interface AndCondition<TCondition> {
 	readonly kind: "and";
 	readonly children: readonly TCondition[];
@@ -360,7 +361,7 @@ interface NotCondition<TCondition> {
 }
 type ConditionPropertyName = string;
 type RequirementCondition = {
-	readonly kind: "eq" | "neq";
+	readonly kind: EqualityComparisonOp;
 	readonly propertyName: ConditionPropertyName;
 	readonly value: string | number | boolean;
 } | {

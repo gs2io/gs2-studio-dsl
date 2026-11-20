@@ -29,6 +29,8 @@
     "gs2.d.ts",
     "raw.d.ts",
     "README.md",
+    "REFERENCE.md",
+    "LLM.md",
     "LICENSE"
   ]
 }
