@@ -1,0 +1,34 @@
+{
+  "name": "gs2-studio-dsl",
+  "version": "2026.11.10",
+  "description": "Type definitions for the GS2 Studio package DSL.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gs2io/gs2-studio-dsl.git"
+  },
+  "homepage": "https://github.com/gs2io/gs2-studio-dsl#readme",
+  "bugs": {
+    "url": "https://github.com/gs2io/gs2-studio-dsl/issues"
+  },
+  "type": "module",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts"
+    },
+    "./gs2": {
+      "types": "./gs2.d.ts"
+    },
+    "./raw": {
+      "types": "./raw.d.ts"
+    }
+  },
+  "files": [
+    "index.d.ts",
+    "gs2.d.ts",
+    "raw.d.ts",
+    "README.md",
+    "LICENSE"
+  ]
+}
