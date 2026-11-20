@@ -37,9 +37,16 @@ jobs:
               echo "$name@$version is already on npm; nothing to publish."
               exit 0
             fi
-            # npm trusted publishing exchanges this CircleCI OIDC token for a one-time publish credential (npm 11.5.1+).
-            export NPM_ID_TOKEN=$(circleci run oidc get --claims '{"aud": "npm:registry.npmjs.org"}')
-            npx --yes npm@11.6.2 publish --access public
+            # npm trusted publishing exchanges this CircleCI OIDC token for a one-time publish credential; npm accepts
+            # CircleCI's token from 11.11.0 on. The assignment is separate from the export so that a failed token request
+            # stops the step (an `export X=$(...)` reports the export's status, not the command's). Never print the token.
+            NPM_ID_TOKEN="$(circleci run oidc get --claims '{"aud": "npm:registry.npmjs.org"}')"
+            if [ -z "$NPM_ID_TOKEN" ]; then
+              echo "CircleCI issued no OIDC token; check that the project uses CircleCI cloud and that OIDC is enabled." >&2
+              exit 1
+            fi
+            export NPM_ID_TOKEN
+            npx --yes npm@11.19.1 publish --access public
 
 workflows:
   publish:
