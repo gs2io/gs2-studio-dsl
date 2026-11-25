@@ -51,6 +51,8 @@ commands below with the executable's path; the first build writes the ledger. It
 4. Type-check: `npx tsc --noEmit -p <dsl>`. Fix every error before building.
 5. First build of a new package:
    `"<GS2 Studio>" dsl build --dir <project> --entry <dsl>/index.ts --write-ledger`
+   It adds the package with the id `definePackage({ id })` declares beside the project's other packages, which stay as
+   they are; later builds replace that package. Only a DSL that declares the id `local-project` replaces `local-project`.
 6. Later builds: the same command without `--write-ledger`. Add `--write-ledger` only when the build reports missing
    ledger tokens for things you added (a type, property, row or transform) and reports no token as "not current".
    A "not current" token means a rename or removal: handle it as in section 4 first.
@@ -59,7 +61,8 @@ commands below with the executable's path; the first build writes the ledger. It
    generation will do wrong or leave out. Fix each one the DSL can fix (section 6) and build again; tell the user about a
    line on another package that the DSL does not change. Then open the project in GS2 Studio and fix what it reports:
    what Unity code generation alone refuses is not printed (see
-   [Building with dsl build](REFERENCE.md#building-with-dsl-build)).
+   [Building with dsl build](REFERENCE.md#building-with-dsl-build)). A build with no such line prints
+   `project check (without Unity code generation): no errors or warnings` last.
 8. Keep `id-ledger.json` and `dependency-surface.json` with `index.ts`; commit them together.
 
 A build that fails a check writes nothing. On failure, read every listed problem, fix the DSL, and rerun.
@@ -77,7 +80,16 @@ MUST:
 - Name domain types in PascalCase and properties in camelCase. Never declare a property named `id`.
 - Bind every `.masterData()` property in some master data resource and every `.userData()` property in some user data
   resource, or remove the hint.
-- Make sure some resource, of this package or of a dependency, mounts the target type of every `defineUiComponent`.
+- Put a `defineUiComponent`, and the type of a `UiSource.rowProp`, only on a type that gets a Handler; `dsl build`
+  refuses either on a type without one and says why. A dependency's type gets one when `types.<Type>.generatedHandlers`
+  of its surface is not `[]` (`mountedBy` names the dependency's resources that mount it), or when your package mounts
+  its overlay of the type itself. A type gets one only when a user data resource, or a master data resource of a model
+  other than a namespace, mounts it.
+- To use what a dependency does as it is (for example "make the wallet usable" with `foundation-economy-currency`),
+  declare the dependency and call its transforms; add rows, resources or UI only for what the surface or a build asks
+  for. The dependency's own UI components (`types.<Type>.uiComponents`) are generated with it, and the game places
+  the Handler that holds the row they show, such as a `WalletHandler` set to the slot (`"0"`). See
+  [Rows in the game](REFERENCE.md#rows-in-the-game).
 - Before adding UI to a dependency's type, read `types.<Type>.uiComponents` of its surface. Reuse a listed item instead
   of adding one that shows the same, and give new items unlisted class names: a listed one replaces that item.
 - Give a single-entry type's row the type name in lower case as its id (`GameSettings` → `gamesettings`).
@@ -89,8 +101,10 @@ MUST:
   project is `"*"`. An installed package has the spec of its source, as the `dependencies` of
   `<project>/packages/<packageId>/package.json` of the package that installed it declare it: a package installed from
   GitHub is `github:<owner>/<repo>[@<range>]` without its subdirectory, and every package of the GS2 Studio package
-  repository is `github:gs2io/gs2-studio-package`. Never give an installed package `"*"`; `dsl build` refuses it and
-  prints the spec to declare (see [Dependencies](REFERENCE.md#dependencies)).
+  repository is `github:gs2io/gs2-studio-package`. A package that came in as a dependency of another one appears in no
+  `package.json` there: take the spec from its entry in `<project>/project-lock.json` (`github:<owner>/<repo>` for
+  `"sourceKind": "github"`). Never give an installed package `"*"`; `dsl build` refuses it and prints the spec to
+  declare (see [Dependencies](REFERENCE.md#dependencies)).
 - Learn what a dependency needs from its surface file, not from its package files: `types.<Type>.propertyDetails`
   gives each property's `type`, `requirement`, `bindingHint` and, when it has one, its `display` (label and description
   per locale); `actionTransformSignatures.<Name>` gives each transform's category and parameters (name, type,
@@ -142,9 +156,10 @@ Names and ids:
 
 - You write names; GS2 Studio stores ids. The ledger maps names (tokens such as `property:Item.count`) to ids.
 - Renaming a type, property, row or transform: the build reports the old token as "not current" and the new one as
-  missing. In `id-ledger.json`, move the old token's id to the new token in `random`, then build without
-  `--write-ledger`. Never let `--write-ledger` record a new id for a renamed thing. Renaming a type also renames its
-  `property:<Type>.<name>` and row tokens; move each of them. It also changes, without a message, the ids of the
+  missing, in one line that says it looks like a rename and names the id to move when it can pair them. In
+  `id-ledger.json`, move the old token's id to the new token in `random`, then build without `--write-ledger`. Never let
+  `--write-ledger` record a new id for a renamed thing. Renaming a type also renames its `property:<Type>.<name>` and
+  row tokens; move each of them, all before the next build. It also changes, without a message, the ids of the
   type's UI component and its items and of user data resources mounted on the type; keep them with
   `deterministicOverrides`. See [The id ledger](REFERENCE.md#the-id-ledger).
 - A row id is letters, digits, `_`, `.` and `-`, at most 128 characters; a resource that binds `id` to a GS2 name sends
@@ -214,11 +229,13 @@ Names and ids:
 | `{"kind":"unresolvedParentBinding",...}` | `Source.parent(...)` on a root resource. | Use `Source.direct(...)`, or move the resource under a parent. |
 | `CLI_DSL_LEDGER_MISSING` | First build without `--write-ledger`. | Add `--write-ledger`. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `random token ... is missing from the ledger`, and no token is "not current" | You added something. | Check the tokens, then rebuild with `--write-ledger`. |
+| `CLI_DSL_LEDGER_MISMATCH` ... `looks like a rename: ... move its id "<id>" from "<old>" to "<new>"` | You renamed something, or changed a row id. | If you renamed it, move the id as the line says (a changed composite-key row id: first check it against the composite key rule). If you removed it and added another, do what the line's last sentence says. Then rebuild without `--write-ledger`. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `is not current; move it to retired` | You renamed or removed something, or changed a row id. | A changed composite-key row id: first check it against the composite key rule. Renamed: move the old token's id to the new token. Removed: move token and id to `retired`. Then rebuild without `--write-ledger`. |
 | `CLI_DSL_LEDGER_INVALID` ... `not canonical` | The ledger's key order, entry order, indentation or final newline differs from what GS2 Studio writes. | Restore that form (section 4). |
 | `CLI_DSL_VALIDATION_FAILED` ... `No master data resource binds this property.` | A `.masterData()` property no resource binds. | Bind it with `Bind.domainProperty(Source.direct(T, "prop"))` in a resource mounted on `T`, or remove the hint. |
 | `CLI_DSL_VALIDATION_FAILED` ... `No user data resource binds this property.` | A `.userData()` property no resource binds. | Bind it in a user data resource (`Bind.domainProperty` / `Bind.domainProperties` with `Source.direct(T, "prop")`), or remove the hint. |
-| `CLI_DSL_VALIDATION_FAILED` ... `is not mounted by any resource` | A UI component on a type no resource mounts. | Mount the type with a resource, or remove the component. |
+| `CLI_DSL_VALIDATION_FAILED` ... `No Handler is generated for the target domain model` | A UI component on a type that gets no Handler (`generatedHandlers: []` in its surface). | Mount the type with a user data resource or a master data resource of a model other than a namespace, or remove the component. |
+| `CLI_DSL_VALIDATION_FAILED` ... `the condition cannot read a value of another domain model's row` | A `UiSource.rowProp` of a type that gets no Handler. | Read a type whose `generatedHandlers` is not `[]`, or remove the item. |
 | `CLI_DSL_VALIDATION_FAILED` ... `instance ids that no longer match their composite-key values` | Row ids not composed from key values in property-id order. | Recompose ids per [Keys and identity](REFERENCE.md#keys-and-identity). |
 | `CLI_DSL_DEPENDENCY_NOT_INSTALLED` | `dependencies` names a package the project lacks. | A package authored in the project: build it with `dsl build` first. Another package: add it in GS2 Studio. |
 | `CLI_DSL_PACKAGE_INVALID` ... `Invalid GitHub dependency spec: github:<owner>/<repo>/<dir>` | A subdirectory in a GitHub spec. | Use `github:<owner>/<repo>`; the project's lock records the directory. |
@@ -227,6 +244,7 @@ Names and ids:
 | `... is a dependency the DSL cannot change, so these are fixed through the dependency that brings it in: ...` | A defect of the dependency itself, not of this DSL. | If the message says to remove the dependency `"X"` from the DSL and the package does not need X, remove it and what refers to it. Otherwise tell the user: the project's owner updates or removes the dependency in GS2 Studio, as the message says. |
 | A successful build prints `[warning] ... No master data is registered for domain model "T"` | A dependency's GS2 resource needs rows of `T` from the project; it is not deployed without them. | Add the row the message names, `instance(dep.type("T"), id, values)`, with the values it names, and build again. `dep.type("<Type>")` means the message names no type `dep.type()` takes: for an inline schema, add elements to the host type's list property with `dep.inlineElements(...)`; for an unresolved type, find it in the surfaces. |
 | A successful build prints `[error] ... the required arguments (...) of action transform ... have no value for row "r"` | An `actionPropertyTransforms` argument reads a property row `r` has no value for. | Give the row the value; for a row a dependency ships, use `overlayInstance(type, "r", { overrides })`. |
+| `CLI_DSL_VALIDATION_FAILED` ... `is not a UTC ISO 8601 timestamp` | A `PT.timestamp()` value in another form, such as with an offset (`+09:00`). The message says `In package "<your package>"` when the row is yours, even of a dependency's type. | Write it in UTC with `Z`, such as `"2026-11-30T15:00:00Z"`, in that `instance(...)` (see [Property types](REFERENCE.md#property-types)). |
 | A UI item of a property you added shows nothing (or `0`) in the game | The property has no binding hint, so the client never gets its value. | Give it `.assetDelivery()`. |
 
 ## 7. Minimal complete example

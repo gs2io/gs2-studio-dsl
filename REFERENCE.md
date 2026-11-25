@@ -244,7 +244,7 @@ transform parameters.
 | `PT.int32()`, `PT.int64()` | integer | `number` |
 | `PT.float32()`, `PT.float64()` | floating point | `number` |
 | `PT.bool()` | boolean | `boolean` |
-| `PT.timestamp()` | timestamp | `string` |
+| `PT.timestamp()` | timestamp, sent to GS2 as Unix time in milliseconds | a UTC ISO 8601 `string` (see below), such as `"2026-11-30T15:00:00Z"` |
 | `PT.localizedString()` | text per locale, delivered as an asset (only with `.assetDelivery()`) | `{ [locale]: string }`, such as `{ ja: "森の巡回", en: "Forest Patrol" }` |
 | `PT.enum(...values)` | one of `values` | `string` |
 | `PT.ref(target)` | a reference to a row of another type (`LocalDomainTypeDef`, `OverlayDomainTypeDef`, `DependencyDomainTypeRef`, or `() => target` for forward/self references) | the row id (`string`) |
@@ -252,6 +252,15 @@ transform parameters.
 | `PT.listOf(elementType)` | a list | an array |
 | `PT.inlineElement(schema)` | an element of a list, from `defineInlineElement` (only inside `PT.listOf`) | an object |
 | `PT.verifyAction()`, `PT.consumeAction()`, `PT.acquireAction()` | a GS2 transaction action | an action value |
+
+A timestamp value is `YYYY-MM-DDTHH:mm:ssZ`, or `YYYY-MM-DDTHH:mm:ss.SSSZ` with exactly three fraction digits. It is
+UTC: it ends with `Z`, never with an offset such as `+09:00`, so convert local times yourself (00:00 on 1 December 2026
+in Japan, UTC+9, is `"2026-11-30T15:00:00Z"`). The date and time must exist (no `24:00:00`, no 30 February) and the year
+is 0001 to 9999. `tsc` checks none of this; `dsl build` refuses another form (`it is not a UTC ISO 8601 timestamp`) and a
+date or time that does not exist (`it is not a valid date and time`).
+GS2's documentation does not say whether the end of a period, such as `endAt` of `foundation-economy-schedule`'s
+`Schedule` (GS2-Schedule's `absoluteEnd`), is itself inside the period. When that second matters, give the last
+moment that must be inside: `"2026-12-31T14:59:59Z"` keeps 31 December open to its end in Japan.
 
 `PT.ref` takes a domain type handle (`Item`), a thunk (`() => Item`) for circular or forward references, or a
 dependency type handle (`dep.type("Item")`; see [Dependencies](#dependencies)). An unregistered target fails with
@@ -1074,7 +1083,7 @@ A `PT.localizedString` operand reads the translation for the player's locale: `t
 Rules: class names are PascalCase and unique among all UI components of the same target type; property names must exist
 on the target (`uiComponentUnknownProperty`); a button's method must be a delegated action registered for the target or
 published by its dependency (`uiComponentUnknownDelegatedAction`). `dsl build` also refuses a UI component whose target
-type no resource mounts, in this package or in a dependency.
+type gets no Handler (see [Rows in the game](#rows-in-the-game)).
 
 ```ts
 defineUiComponent(Item, {
@@ -1118,7 +1127,8 @@ at once and evaluates the condition again whenever its own row or any of those h
 holds the row, or while a property it reads has no value, the condition is unknown; it logs a warning once when no handler of
 the type is above it, and once when all of them have loaded and none holds the row. While unknown, `interactable` makes every `Selectable` in both lists non-interactable, and `activeToggle` leaves its
 targets as they are. `dsl build` refuses an unknown type or property and an invalid row id. Code generation leaves the item
-out with a warning when the property is not a number or `bool`, and refuses the project when the type emits no handler.
+out with a warning when the property is not a number or `bool`. `dsl build` refuses the component when `type` gets no
+Handler, as code generation would refuse the project (see [Rows in the game](#rows-in-the-game)).
 
 ### Item options
 
@@ -1160,7 +1170,10 @@ uiComponents: [
 A UI component describes the components of one row. It makes no list, prefab or scene: the game places the generated
 components in its own UI, below a handler that holds the row. Each component uses the nearest `<Type>HandlerBase` above
 it in the hierarchy; without one it logs a warning and does nothing. Code generation writes these handlers for each type
-a resource mounts:
+that a resource it reads rows from mounts: a user data resource, or a master data resource of a model other than a namespace
+(a namespace is deploy settings, not rows). A dependency's surface names the handlers of each of its types
+(`types.<Type>.generatedHandlers`), judged on that package and its dependencies; a type it lists none for takes no UI
+component and no `UiSource.rowProp`, unless your package mounts its overlay of the type with such a resource:
 
 | Generated class | Holds |
 | --- | --- |
@@ -1170,6 +1183,13 @@ a resource mounts:
 
 A list shows the rows GS2 holds at run time (the deployed master data, or the player's user data), each with the values
 of its asset-delivered properties.
+
+A dependency's own UI components are generated with it, so a dependency used as it is needs nothing in the DSL beyond
+the dependency and what its surface asks for. `foundation-economy-currency` is an example: the transforms that deposit
+into a wallet (`DepositFreeCurrency`, `DepositCurrency`) are all the DSL needs, and no `Wallet` row is needed. The game
+shows a balance with the package's `Wallet` items (`FreeBalanceLabel`, `PaidBalanceLabel`, `TotalBalanceLabel`, listed
+under `types.Wallet.uiComponents`) below a `WalletHandler` whose row id is the wallet slot as a decimal string (`"0"`
+for slot 0, the `slot` the transforms take).
 
 Every list of a type is in the order of the type's sort setting (`sort` on a local type in
 [Keys and identity](#keys-and-identity), or on an overlay in [Overlay types](#overlay-types)). Rows whose keys are
@@ -1264,6 +1284,12 @@ the project's package that installed it (`<project>/packages/<packageId>/package
 included. A `file:` path is relative to the declaring package's directory, so recompute it from
 `<project>/packages/<your packageId>/` when the two directories are not at the same depth:
 
+- A package that came into the project as a dependency of another one, rather than being added itself, is declared in
+  no `package.json` of `<project>/packages/`. Its entry in `<project>/project-lock.json` names its source: for
+  `"sourceKind": "github"`, the spec is `github:<owner>/<repo>` with that entry's `owner` and `repo`; for `"sourceKind":
+  "npm"`, `npm:<packageName>@<range>`. `dsl build`
+  accepts any spec of the same repository, and when a spec names another source it prints the spec the packages that
+  brought the dependency in declare.
 - A GitHub spec names the repository only, also for a package in a subdirectory of it: `github:<owner>/<repo>/<dir>`
   is refused. The project's `project-lock.json` records the directory (`subdirectory` of the package's entry, beside
   `owner` and `repo`). Every package of the GS2 Studio package repository is `github:gs2io/gs2-studio-package`.
@@ -1303,6 +1329,8 @@ Besides names and ids, the surface describes what a dependent needs to use them:
 | `types.<Type>.sort` | The order of the type's rows, `{ key, direction }` as an overlay's `sort` takes it (`key` is `null` for the id); absent when the rows are in ascending id order, and from older surfaces. |
 | `types.<Type>.shippedRowIds` | The ids of the rows this package ships of the type, sorted; `[]` when it ships none. Each package lists only its own rows: the rows of a type are those of every surface entry with the same `canonicalPackageId` and `canonicalTypeId`, plus those every surface lists under `shippedRowsOfDependencyTypes."<canonicalPackageId>:<canonicalTypeId>"`. These rows are provided, so do not author them: a row you author with a listed id replaces the shipped row and all its values (change some values with `overlayInstance` instead). Rows with other ids are added beside them, except on a single-entry type, whose one row is the shipped one. A row an `overlayInstance` suppresses is still listed. When no surface lists a row and a build names the type in `No master data is registered for domain model "<Type>"`, the rows are yours to author. |
 | `types.<Type>.uiComponents.<ClassName>` | The UI items on the type, the package's own and those of the packages it overlays (`{}` for none), by class name: `kind` (`label`, `buttonAction`, ...), `name`, the declaring `packageId` and, for a button, the delegated action `method` it calls. An inline schema lists its items under `inlineSchemas.<list>.uiComponents`. Code generation gives the items of an overlay, renamed or not, the same generated classes as the type's, so an item you add with a listed class name replaces the listed item (`dsl build` warns about it). Reuse a listed item instead of adding one that shows the same. |
+| `types.<Type>.generatedHandlers` | The classes Unity code generation writes for the rows of the type, judged on the package and its dependencies: `<Type>Handler`, and for a type whose rows a GS2 model lists, `<Type>ListHandler`, `<Type>ListItemHandler` and one `<Type>ListBy<Ref>Handler` per reference it can list by (see [Rows in the game](#rows-in-the-game)). `<Type>` is the type's one generated name, which an overlay keeps. `[]` when it writes none: a UI component on the type, or a `UiSource.rowProp` of it, then fails `dsl build` unless your package mounts its overlay of the type with a resource of its own. The element Handlers of an inline schema are not listed. Absent when code generation refuses the type. |
+| `types.<Type>.mountedBy` | `masterData` and `userData`: the GS2 models (`<service>.<Model>`) of this package's own resources mounted on the type, sorted. A type mounted only by a namespace, such as `CurrencyStore` (`money2.Namespace`), gets no Handler. Other packages that overlay the type list their resources in their own surfaces. |
 | `shippedRowsOfDependencyTypes` | The ids of the rows this package ships of a dependency's type it does not declare (`instance(dep.type("<Type>"), ...)`), keyed `<canonicalPackageId>:<canonicalTypeId>` of the type, as its surface entries publish them. |
 | `actionTransformSignatures.<Name>` | `category` (`acquire`, `consume` or `verify`) and `parameters`: per parameter in declaration order, `type`, `required` and, only when the parameter gives one, `description` (one text, not per locale). A `ref<T>` parameter takes a row id of `T`. |
 
@@ -1322,6 +1350,19 @@ throw. Write it again with `dsl surfaces`.
       "shippedRowIds": [],
       "canonicalPackageId": "example-inventory",
       "canonicalTypeId": "dt_20QRK0BTMW89TAWPHGNYFXNYJ5",
+      "generatedHandlers": [
+        "ItemHandler",
+        "ItemListHandler",
+        "ItemListItemHandler"
+      ],
+      "mountedBy": {
+        "masterData": [
+          "inventory.SimpleItemModel"
+        ],
+        "userData": [
+          "inventory.SimpleItem"
+        ]
+      },
       "uiComponents": {
         "CountValue": {
           "kind": "value",
@@ -1461,9 +1502,15 @@ Rules:
 - The first build runs with `--write-ledger`; it creates the ledger. Later builds that add types, properties, rows or
   transforms need `--write-ledger` again, which only adds missing `random` tokens and never changes existing values.
 - Never change an existing id: other packages and projects refer to it.
-- Renaming a type, property, row or transform changes its token, and the build fails with `random token <old> is not
-  current; move it to retired` and `random token <new> is missing from the ledger`. To keep the identity, move the old
-  token's id to the new token in `random` and keep the entries sorted. While the old token is still in `random`,
+- Renaming a type, property, row or transform changes its token, and the build fails, also with `--write-ledger`. When
+  the old token and the new one are the only pair of their kind and owner (the same type for a property or row), or a
+  property or row keeps its name under a renamed type, it reports them together: `random token <old> is not current and
+  <new> is missing, which looks like a rename: ... move its id "<id>" from "<old>" to "<new>"`. Otherwise, as for two
+  properties of one type renamed at once, it reports `random token <old> is not current; ...` and `random token <new> is
+  missing from the ledger` apart. To keep the identity, move the old token's id to the new token in `random` and keep the
+  entries sorted. Move every id the build lists before building again: once `type:<old>` is moved, its properties and
+  rows no longer pair. A pair that is really a removal and an unrelated addition, such as deleting one row and adding
+  another, is reported the same way; do what the line's last sentence says for it. While the old token is still in `random`,
   `--write-ledger` fails with the same "not current" problem and writes nothing; it would record a new id for the new
   token only after the old one is moved to `retired`, which ends the old identity. Renaming a type renames the tokens
   of its properties and rows too (`type:Item` and `property:Item.count` become `type:Article` and
@@ -1496,10 +1543,13 @@ Rules:
 "<GS2 Studio>" dsl build --dir <project> --entry <dsl/index.ts> [--ledger <path>] [--write-ledger] [--catalogs <dir>]
 ```
 
-`dsl build` evaluates the entry, checks the package, and on success saves it into the project: it replaces the
-project's own package with the same id (a new project's own package is `local-project`) or adds a new package. It
-writes the ledger (when it changes), then the project, then `dependency-surface.json` beside the ledger. When a check
-fails it writes nothing.
+`dsl build` evaluates the entry, checks the package, and on success saves it into the project as the package whose id
+`definePackage({ id })` declares, beside the project's other packages: the first build adds it (`added <id> in
+<project>`), and later builds replace it (`replaced <id> in <project>`). It changes no other package. `local-project`,
+the package a new project starts with, is replaced only by a DSL that declares that id. Deploy and code generation cover
+every package of the project, and a dependency several packages declare is in the project once. The build writes the
+ledger (when it changes), then the project, then `dependency-surface.json` beside the ledger. When a check fails it
+writes nothing.
 
 | Failure | Cause | Fix |
 | --- | --- | --- |
@@ -1510,15 +1560,16 @@ fails it writes nothing.
 | `CLI_DSL_DEPENDENCY_NOT_INSTALLED` | A declared dependency is not in the project. | For a package authored in the project, build it with `dsl build` first; for another package, add it in GS2 Studio. |
 | `CLI_DSL_DEPENDENCY_SPEC_MISMATCH` | The spec of an installed package names another source than the one the project installed it from, such as `*`. | Declare it with the spec the message prints. |
 | `CLI_DSL_LEDGER_MISSING` | No ledger, and no `--write-ledger`. | Run with `--write-ledger` the first time. |
-| `CLI_DSL_LEDGER_MISMATCH` | Missing tokens (listed with candidate ids), tokens that are no longer current, or a retired token that reappeared. | Missing tokens: rerun with `--write-ledger`. Others: edit the ledger as the message says. |
+| `CLI_DSL_LEDGER_MISMATCH` | Missing tokens (listed with candidate ids), tokens that are no longer current, likely renames (a token not current paired with a missing one), or a retired token that reappeared. | A rename (the line says `looks like a rename`, or you renamed it): move the old token's id to the new token, as [The id ledger](#the-id-ledger) says. A removal: move the token and its id to `retired`. Then, only for tokens of things you added, rerun with `--write-ledger`. A reappeared token: add the override the message shows. |
 | `CLI_DSL_LEDGER_INVALID` | The ledger is not canonical JSON of the shape above. | Repair the file as the message says. |
 | `CLI_DSL_LEDGER_UNREADABLE` | The ledger file exists but cannot be read. | Fix the file's permissions or path. |
 | `CLI_DSL_WRITE_FAILED` | Writing the ledger or the dependency surface failed. | Fix the cause the message names and rerun. |
-| `CLI_DSL_VALIDATION_FAILED` | The checks the editor applies before it opens or installs a package: unbound `masterData` / `userData` properties, rows that fail validation, composite-key ids, UI components on unmounted types, and others, listed one by one. | Fix each finding. |
+| `CLI_DSL_VALIDATION_FAILED` | The checks the editor applies before it opens or installs a package: unbound `masterData` / `userData` properties, rows that fail validation, composite-key ids, UI components and `UiSource.rowProp` on types that get no Handler, and others, listed one by one. | Fix each finding. |
 
 After it saves the package, `dsl build` prints on stderr the errors and warnings `project check` reports for the
 project, as `[error] ...` and `[warning] ...` lines (`--json`: `diagnostics`). The build still exits with 0, because the
-package is saved; fix each line and build again:
+package is saved; fix each line and build again. When there is none, the build prints `project check (without Unity code
+generation): no errors or warnings` as its last line on stdout (`--json`: `diagnostics` is `[]`):
 
 | Line | Fix |
 | --- | --- |

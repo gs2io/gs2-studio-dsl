@@ -9,11 +9,11 @@ type-check; use these declarations in your editor and with `tsc --noEmit`.
 - For LLM coding agents: [LLM.md](LLM.md)
 
 ```sh
-npm install --save-dev gs2-studio-dsl@2026.11.13
+npm install --save-dev gs2-studio-dsl@2026.11.14
 ```
 
 The version is the GS2 Studio version whose DSL these declarations describe: a DSL written
-against gs2-studio-dsl 2026.11.13 builds with GS2 Studio 2026.11.13 and later. Install the version that
+against gs2-studio-dsl 2026.11.14 builds with GS2 Studio 2026.11.14 and later. Install the version that
 matches the oldest GS2 Studio you build with.
 
 ```ts
@@ -67,8 +67,9 @@ The GS2 Studio executable runs the `dsl` commands headless and exits with their 
 "<GS2 Studio>" dsl init --dir <project> --out <dsl> --package-id <id>
 # write <out>/<packageId>.json for each package of the project (installed or authored in it)
 "<GS2 Studio>" dsl surfaces --dir <project> --out <out>
-# evaluate the DSL, check it, and save the package into the project (--write-ledger the first time);
-# after saving it prints the [error] and [warning] lines project check reports, and exits with 0
+# evaluate the DSL, check it, and save the package it declares into the project beside the project's other packages
+# (--write-ledger the first time); after saving it prints the [error] and [warning] lines project check reports, or a
+# line saying there are none, and exits with 0
 "<GS2 Studio>" dsl build --dir <project> --entry <dsl/index.ts> --write-ledger
 ```
 

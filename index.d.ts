@@ -100,6 +100,10 @@ interface PublishedTransformSignature {
 	readonly category: string;
 	readonly parameters: Readonly<Record<string, PublishedTransformParameter>>;
 }
+interface PublishedResourceMounts {
+	readonly masterData: readonly string[];
+	readonly userData: readonly string[];
+}
 interface DependencySurfaceType {
 	/** Keep the declaring id for direct-source links even when canonical identity belongs to another package. */
 	readonly id: string;
@@ -134,6 +138,14 @@ interface DependencySurfaceType {
 	 * same class name. Absent from surfaces written before UI components were published.
 	 */
 	readonly uiComponents?: Readonly<Record<string, PublishedUiComponentItem>>;
+	/**
+	 * The class names of the Handlers Unity code generation writes for the rows of the type (`<Type>Handler`, `<Type>ListHandler`,
+	 * `<Type>ListItemHandler`, `<Type>ListBy<Ref>Handler`), judged on the package and its dependencies. Empty when it writes none, so
+	 * no UI component on the type and no `UiSource.rowProp` of it can be generated. Absent when generation refuses the type.
+	 */
+	readonly generatedHandlers?: readonly string[];
+	/** The package's own resources mounted on the type; other packages that overlay it list theirs in their own surfaces. */
+	readonly mountedBy?: PublishedResourceMounts;
 }
 interface DependencySurface {
 	readonly schemaVersion: number;
