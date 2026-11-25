@@ -38,33 +38,6 @@ interface ExternalResourceRefSnapshotDto {
 	readonly resourceKind: ResourceKindSnapshotDto;
 	readonly resourceId: string;
 }
-interface TaggedExternalResourceRefSnapshotDto extends ExternalResourceRefSnapshotDto {
-	readonly kind: "external";
-}
-type ResourceRefSnapshotDto = {
-	readonly kind: "local";
-	readonly resourceKind: ResourceKindSnapshotDto;
-	readonly resourceId: string;
-} | TaggedExternalResourceRefSnapshotDto;
-type TransformTargetSnapshotDto = {
-	readonly kind: "unselected";
-} | {
-	readonly kind: "selected";
-	readonly transformPackageId: string;
-	readonly transformId: string;
-};
-interface TransformArgumentEnvelopeSnapshotDto<TSource> {
-	readonly parameterName: string;
-	readonly source: TSource;
-}
-interface TransformCallSnapshotDto<TArgument, TTarget extends TransformTargetSnapshotDto = TransformTargetSnapshotDto> {
-	readonly target: TTarget;
-	readonly arguments: readonly TArgument[];
-}
-interface TransformReferenceSnapshotDto<TArgument, TTarget extends TransformTargetSnapshotDto = TransformTargetSnapshotDto> {
-	readonly kind: "actionTransformRef";
-	readonly invocation: TransformCallSnapshotDto<TArgument, TTarget>;
-}
 type ActionCategorySnapshotDto = "verify" | "consume" | "acquire";
 interface LocalizedDisplayEntrySnapshotDto {
 	readonly label?: string;
@@ -78,464 +51,54 @@ type DomainPropertyValueSnapshotDto = JsonValue;
 type UiImageModeSnapshotDto = "spriteResourcePath" | "addressableKey" | "url" | "assetReference";
 type FileRequirementDto = RequirementSnapshotDto;
 type FileDomainPropertyValueDto = DomainPropertyValueSnapshotDto;
-type FileResourceRefDto = ResourceRefSnapshotDto;
-type FileOutputParameterMappingDto = {
-	readonly kind: "parameter";
-	readonly parameterName: string;
-	readonly sourceParameter?: string;
-} | {
-	readonly kind: "static";
-	readonly parameterName: string;
-	/** Restore checks the value is JSON. */
-	readonly value: unknown;
-} | {
-	readonly kind: "resourceKey";
-	readonly parameterName: string;
-} | {
-	readonly kind: "placeholder";
-	readonly parameterName: string;
-	readonly value: string;
-} | {
-	readonly kind: "mountedResourceProperty";
-	readonly parameterName: string;
-	readonly resourceRef: FileResourceRefDto;
-	readonly keyPropertyName?: string;
-};
-type FileTransformConditionDto = {
-	readonly sourceParameter: string;
-	readonly operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
-	/** Restore checks the value is JSON. */
-	readonly value: unknown;
-};
-type FileDelegationParameterBindingDto = TransformArgumentEnvelopeSnapshotDto<{
-	readonly kind: "parameter";
-	readonly sourceParameter?: string;
-} | {
-	readonly kind: "static";
-	/** Restore checks the value is JSON. */
-	readonly value: unknown;
-}>;
-type FileActionTransformDirectOutputDto = {
-	readonly kind: "direct";
-	readonly conditions: readonly FileTransformConditionDto[];
-	readonly actionName?: string;
-	readonly resourceRef?: FileResourceRefDto;
-	readonly parameterMappings: readonly FileOutputParameterMappingDto[];
-};
-interface FileActionTransformDelegationOutputDto {
-	readonly kind: "delegation";
-	readonly conditions: readonly FileTransformConditionDto[];
-	readonly invocation: TransformCallSnapshotDto<FileDelegationParameterBindingDto>;
-}
-type FileActionTransformOutputDto = FileActionTransformDirectOutputDto | FileActionTransformDelegationOutputDto;
-type FileDelegationOutputDto = Extract<FileActionTransformOutputDto, {
-	kind: "delegation";
-}>;
-type FileDelegationConditionDto = FileDelegationOutputDto["conditions"][number];
-declare class ActionTransformDelegationOutputBuilder {
-	private readonly _targetPackageId;
-	private readonly _targetId;
-	private readonly _parameterBindings;
-	private readonly _conditions;
-	constructor(targetPackageId: string, targetId: string);
-	bindParameter(targetParameter: string, sourceParameter: string): this;
-	bindStatic(targetParameter: string, value: JsonValue): this;
-	condition(sourceParameter: string, operator: FileDelegationConditionDto["operator"], value: JsonValue): this;
-}
-declare const RESOURCE_DEFINITION: unique symbol;
-interface ResourceDefinitionBase<TKind extends "masterData" | "userData"> {
-	readonly definitionKind: "resource";
-	readonly resourceKind: TKind;
-	readonly [RESOURCE_DEFINITION]: TKind;
-}
-export interface MasterDataResourceDefinition extends ResourceDefinitionBase<"masterData"> {
-}
-export interface UserDataResourceDefinition extends ResourceDefinitionBase<"userData"> {
-}
-declare abstract class ResourceRefBase<TKind extends string> {
-	#private;
-	constructor(token: symbol, resolve: () => string);
-	_resolveId(): string;
-}
-declare class MasterDataResourceRef extends ResourceRefBase<"master"> {
-}
-declare class UserDataResourceRef extends ResourceRefBase<"user"> {
-}
-type MasterDataResourceReference = MasterDataResourceDefinition | MasterDataResourceRef;
-type UserDataResourceReference = UserDataResourceDefinition | UserDataResourceRef;
-type ResourceRefProvider = () => MasterDataResourceReference | UserDataResourceReference;
-declare class ActionTransformOutputBuilder {
-	private readonly _actionName;
-	/** A local target is resolved at build so forward resources can acquire ids; an external target is already published. */
-	private _resourceRef?;
-	private readonly _parameterMappings;
-	private readonly _conditions;
-	constructor(actionName: string);
-	/** Defer the provider until build so forward resources can acquire ids; setting it replaces any external target. */
-	resourceRef(refProvider: ResourceRefProvider): this;
-	/** Require a published resource id because this build cannot inspect the dependency closure; setting it replaces any local target. */
-	externalResourceRef(sourcePackageId: string, resourceKind: "masterData" | "userData", resourceId: string): this;
-	mapParameter(parameterName: string, sourceParameter: string): this;
-	mapStatic(parameterName: string, value: JsonValue): this;
-	mapResourceKey(parameterName: string): this;
-	mapPlaceholder(parameterName: string, value: string): this;
-	/** Defer mounted-resource mappings too, so their refs can point forward just like the output target. */
-	mapMountedResourceProperty(parameterName: string, refProvider: ResourceRefProvider, keyPropertyName?: string): this;
-	condition(sourceParameter: string, operator: FileTransformConditionDto["operator"], value: JsonValue): this;
-	/** Fold provider throws into the unresolved-ref diagnostic so callers receive a collected build error. */
-	private resolveLocalRef;
-}
-type Result<T, E> = {
-	readonly kind: "success";
-	readonly value: T;
-} | {
-	readonly kind: "failure";
-	readonly error: E;
-};
-type CombinedValues<T extends Record<string, () => Result<unknown, unknown>>> = {
-	[K in keyof T]: T[K] extends () => Result<infer V, unknown> ? V : never;
-};
-type CombinedError<T extends Record<string, () => Result<unknown, unknown>>> = {
-	[K in keyof T]: T[K] extends () => Result<unknown, infer E> ? E : never;
-}[keyof T];
-declare const Result: {
-	readonly success: <T, E = never>(value: T) => Result<T, E>;
-	readonly failure: <T = never, E = unknown>(error: E) => Result<T, E>;
-	readonly isSuccess: <T, E>(result: Result<T, E>) => result is {
-		readonly kind: "success";
-		readonly value: T;
-	};
-	readonly isFailure: <T, E>(result: Result<T, E>) => result is {
-		readonly kind: "failure";
-		readonly error: E;
-	};
-	readonly map: <T, E, U>(result: Result<T, E>, fn: (value: T) => U) => Result<U, E>;
-	readonly flatMap: <T, E, U, F>(result: Result<T, E>, fn: (value: T) => Result<U, F>) => Result<U, E | F>;
-	readonly mapError: <T, E, F>(result: Result<T, E>, fn: (error: E) => F) => Result<T, F>;
-	/**
-	 * Eager Result arguments would run every computation before `combine` starts.
-	 * Thunks let the first failure prevent later computations from running.
-	 */
-	readonly combine: <T extends Record<string, () => Result<unknown, unknown>>>(thunks: T) => Result<CombinedValues<T>, CombinedError<T>>;
-	readonly traverse: <T, U, E>(items: readonly T[], fn: (item: T, index: number) => Result<U, E>) => Result<readonly U[], E>;
-	/**
-	 * Use only when failure proves a programming bug, such as an invalid fixture.
-	 * Recoverable failures need Result narrowing so callers can handle the error.
-	 */
-	readonly unwrap: <T, E>(result: Result<T, E>) => T;
-	/**
-	 * Already-validated inputs make failure a caller bug; returning it as a domain
-	 * error would hide the broken invariant.
-	 */
-	readonly unwrapInvariant: <T, E extends {
-		readonly kind: string;
-	}>(result: Result<T, E>, context: string) => T;
-	readonly valueOrUndefined: <T, E>(result: Result<T, E>) => T | undefined;
-};
-type Unverified<B extends string> = string & {
-	readonly __brand: B;
-};
-type Verified<B extends string> = Unverified<B> & {
-	readonly __verified: true;
-};
-interface BrandFactory<T extends Verified<string>, E> {
-	readonly create: (value: string) => Result<T, E>;
-	readonly trusted: (value: string) => T;
-	/** Promotes the brand's Unverified twin through the same grammar `create` applies; a brand without a twin has nothing to pass. */
-	readonly verify: (value: Unverified<T["__brand"]>) => Result<T, E>;
-}
-type DomainTypeName = Verified<"DomainTypeName">;
-type UnverifiedDomainTypeName = Unverified<DomainTypeName["__brand"]>;
-declare const DomainTypeName: BrandFactory<DomainTypeName, {
-	readonly kind: "invalidDomainTypeName";
-	readonly reason: "empty" | "tooLong" | "notPascalCase";
-}>;
-declare const UnverifiedDomainTypeName: {
-	(value: string): Unverified<"DomainTypeName">;
-	(value: string | undefined): Unverified<"DomainTypeName"> | undefined;
-};
-declare const PRIMITIVE_TYPES: {
-	readonly kinds: readonly ("string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp")[];
-	has(value: unknown): value is "string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp";
-};
-type PrimitiveTypeKind = (typeof PRIMITIVE_TYPES.kinds)[number];
-type PropertyElementTypeShape<TypeId extends string> = {
-	readonly kind: "primitive";
-	readonly primitiveType: PrimitiveTypeKind;
-} | {
-	readonly kind: "enum";
-	readonly values: readonly string[];
-} | {
-	readonly kind: "ref";
-	readonly targetTypeId?: TypeId;
-} | {
-	readonly kind: "inline";
-	readonly targetTypeId?: TypeId;
-} | {
-	readonly kind: "verifyAction";
-} | {
-	readonly kind: "consumeAction";
-} | {
-	readonly kind: "acquireAction";
-};
-type ResolvedFreeElement = Exclude<PropertyElementTypeShape<never>, {
-	readonly kind: "ref" | "inline";
-}>;
-type PrimitivePropertyTypeDef = Extract<ResolvedFreeElement, {
-	readonly kind: "primitive";
-}>;
-type EnumPropertyTypeDef = Extract<ResolvedFreeElement, {
-	readonly kind: "enum";
-}>;
-type VerifyActionPropertyTypeDef = Extract<ResolvedFreeElement, {
-	readonly kind: "verifyAction";
-}>;
-type ConsumeActionPropertyTypeDef = Extract<ResolvedFreeElement, {
-	readonly kind: "consumeAction";
-}>;
-type AcquireActionPropertyTypeDef = Extract<ResolvedFreeElement, {
-	readonly kind: "acquireAction";
-}>;
-interface RefPropertyTypeDef {
-	readonly kind: "ref";
-	readonly targetType: UnverifiedDomainTypeName;
-}
-interface InlinePropertyTypeDef {
-	readonly kind: "inline";
-	readonly targetType: UnverifiedDomainTypeName;
-}
-interface InlineElementTypeDef {
-	readonly kind: "inlineElement";
-	readonly schema: {};
-}
-interface ListPropertyTypeDef<TElement extends PropertyTypeDef | InlineElementTypeDef = PropertyTypeDef | InlineElementTypeDef> {
-	readonly kind: "list";
-	readonly elementType: TElement;
-}
-type PropertyTypeDef = ResolvedFreeElement | RefPropertyTypeDef | InlinePropertyTypeDef | ListPropertyTypeDef;
-type TransformParameterTypeDef = Exclude<PropertyTypeDef, {
-	readonly kind: "list";
-}> | ListPropertyTypeDef<PropertyTypeDef>;
-declare class ActionTransformBuilder {
-	private readonly _name;
-	private readonly _id;
-	private _category;
-	private readonly _parameters;
-	private readonly _outputBuilders;
-	private readonly _parameterErrors;
-	constructor(name: string);
-	/** Typed as the persisted category so the published declarations do not carry the domain category helpers. */
-	category(cat: ActionCategorySnapshotDto): this;
-	parameter(name: string, options: {
-		type: TransformParameterTypeDef;
-		description?: string;
-		required?: boolean;
-	}): this;
-	output(actionName: string, cb: (builder: ActionTransformOutputBuilder) => void): this;
-	/** Defer target existence checks because a single-package build has no dependency closure. */
-	delegationOutput(targetPackageId: string, targetId: string, cb: (builder: ActionTransformDelegationOutputBuilder) => void): this;
-}
-declare const BINDING_HINT_KINDS: {
-	readonly kinds: readonly ("masterData" | "userData" | "none" | "assetDelivery")[];
-	has(value: unknown): value is "masterData" | "userData" | "none" | "assetDelivery";
-};
-type BindingHintKind = (typeof BINDING_HINT_KINDS.kinds)[number];
-declare const COMPARISON_OPS: {
-	readonly kinds: readonly ("eq" | "neq" | "gt" | "gte" | "lt" | "lte")[];
-	has(value: unknown): value is "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
-};
-type ComparisonOp = (typeof COMPARISON_OPS.kinds)[number];
-type EqualityComparisonOp = Extract<ComparisonOp, "eq" | "neq">;
-type OrderingComparisonOp = Exclude<ComparisonOp, EqualityComparisonOp>;
-interface AndCondition<TCondition> {
-	readonly kind: "and";
-	readonly children: readonly TCondition[];
-}
-interface OrCondition<TCondition> {
-	readonly kind: "or";
-	readonly children: readonly TCondition[];
-}
-interface NotCondition<TCondition> {
-	readonly kind: "not";
-	readonly child: TCondition;
-}
-type ConditionPropertyName = string;
-type RequirementCondition = {
-	readonly kind: EqualityComparisonOp;
-	readonly propertyName: ConditionPropertyName;
-	readonly value: string | number | boolean;
-} | {
-	readonly kind: OrderingComparisonOp;
-	readonly propertyName: ConditionPropertyName;
-	readonly value: number;
-} | {
-	readonly kind: "isSet" | "isNotSet";
-	readonly propertyName: ConditionPropertyName;
-} | AndCondition<RequirementCondition> | OrCondition<RequirementCondition> | NotCondition<RequirementCondition>;
-type RequirementCondition$1 = RequirementCondition;
-declare class PropertyDef<TName extends string = string, TValue extends FileDomainPropertyValueDto = FileDomainPropertyValueDto, TRequired extends boolean = boolean> {
-	readonly _kind: "PropertyDef";
-	readonly name: TName;
-	readonly type: PropertyTypeDef;
-	private _localizedDisplay?;
-	private _requirement;
-	private _bindingHint?;
-	constructor(name: TName, type: PropertyTypeDef);
-	localizedDisplay(localizedDisplay: LocalizedDisplaySnapshotDto): PropertyDef<TName, TValue, TRequired>;
-	required(): PropertyDef<TName, TValue, true>;
-	requiredWhen(condition: RequirementCondition$1, requiredWhenMet?: boolean): PropertyDef<TName, TValue, false>;
-	optionalWhen(condition: RequirementCondition$1): PropertyDef<TName, TValue, false>;
-	masterData(): PropertyDef<TName, TValue, TRequired>;
-	userData(): PropertyDef<TName, TValue, TRequired>;
-	assetDelivery(): PropertyDef<TName, TValue, TRequired>;
-}
-interface PTHelper {
-	string(): PrimitivePropertyTypeDef;
-	string<N extends string>(name: N): PropertyDef<N, string, false>;
-	int32(): PrimitivePropertyTypeDef;
-	int32<N extends string>(name: N): PropertyDef<N, number, false>;
-	int64(): PrimitivePropertyTypeDef;
-	int64<N extends string>(name: N): PropertyDef<N, number, false>;
-	float32(): PrimitivePropertyTypeDef;
-	float32<N extends string>(name: N): PropertyDef<N, number, false>;
-	float64(): PrimitivePropertyTypeDef;
-	float64<N extends string>(name: N): PropertyDef<N, number, false>;
-	bool(): PrimitivePropertyTypeDef;
-	bool<N extends string>(name: N): PropertyDef<N, boolean, false>;
-	timestamp(): PrimitivePropertyTypeDef;
-	timestamp<N extends string>(name: N): PropertyDef<N, string, false>;
-	ref(targetType: string): RefPropertyTypeDef;
-	inline(targetType: string): InlinePropertyTypeDef;
-	enum(...values: string[]): EnumPropertyTypeDef;
-	inlineElement(schema: InlineElementTypeDef["schema"]): InlineElementTypeDef;
-	listOf<T extends PropertyTypeDef | InlineElementTypeDef>(elementType: T): ListPropertyTypeDef<T>;
-	verifyAction(): VerifyActionPropertyTypeDef;
-	consumeAction(): ConsumeActionPropertyTypeDef;
-	acquireAction(): AcquireActionPropertyTypeDef;
-	prop<N extends string>(name: N, type: Exclude<PropertyTypeDef, PrimitivePropertyTypeDef>): PropertyDef<N, FileDomainPropertyValueDto, false>;
-}
-export declare const PT: PTHelper;
-type ConditionScalar = string | number | boolean;
-/** The signatures refuse the shapes the stored-condition parser rejects: a non-scalar comparison value and an empty junction. */
-export declare const Cond: {
-	readonly eq: (propertyName: string, value: ConditionScalar) => RequirementCondition$1;
-	readonly neq: (propertyName: string, value: ConditionScalar) => RequirementCondition$1;
-	readonly isSet: (propertyName: string) => RequirementCondition$1;
-	readonly isNotSet: (propertyName: string) => RequirementCondition$1;
-	readonly not: (condition: RequirementCondition$1) => RequirementCondition$1;
-	readonly and: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition$1;
-	readonly or: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition$1;
-	readonly gt: (propertyName: string, value: number) => RequirementCondition$1;
-	readonly lt: (propertyName: string, value: number) => RequirementCondition$1;
-	readonly gte: (propertyName: string, value: number) => RequirementCondition$1;
-	readonly lte: (propertyName: string, value: number) => RequirementCondition$1;
-};
-interface PropertyOptions {
-	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
-	readonly requirement?: FileRequirementDto;
-	readonly bindingHint?: BindingHintKind;
-}
-interface DomainTypeTransformArgumentDef {
-	readonly parameterName: string;
-	readonly source: {
-		readonly kind: "static";
-		readonly value: unknown;
-	} | {
-		readonly kind: "domainProperty";
-		readonly propertyName: string;
-	} | {
-		readonly kind: "actionLiteral";
-		readonly value: unknown;
-	} | {
-		readonly kind: "placeholder";
-		readonly value: string;
-	} | {
-		readonly kind: "actionTransformRef";
-		readonly transformPackageId: string;
-		readonly transformId: string;
-		readonly arguments: readonly DomainTypeTransformArgumentDef[];
-	};
-}
-type ListValueSourceDef = {
-	readonly kind: "static";
-	readonly value: unknown;
-} | {
-	readonly kind: "domainProperty";
-	readonly propertyName: string;
-};
-type ListEntryDef = {
-	readonly kind: "value";
-	readonly source: ListValueSourceDef;
-} | {
-	readonly kind: "fields";
-	readonly fields: readonly {
-		readonly name: string;
-		readonly source: ListValueSourceDef;
-	}[];
-};
-interface DelegatedActionParameterOverrideDef {
-	readonly parameterName: string;
-	readonly source: {
-		readonly kind: "static";
-		readonly value: unknown;
-	} | {
-		readonly kind: "domainProperty";
-		readonly propertyName: string;
-	} | {
-		readonly kind: "actionLiteral";
-		readonly value: unknown;
-	} | {
-		readonly kind: "listEntries";
-		readonly entries: readonly ListEntryDef[];
-	};
-}
-interface DelegatedActionDef {
-	readonly targetActionKey: string;
-	/** Keep a local resource ref until package compilation can supply both its id and the owning package coordinate. */
-	readonly targetResource: MasterDataResourceReference | UserDataResourceReference;
-	/** Omission leaves catalog explicit parameters available to the generated caller. */
-	readonly parameterOverrides?: readonly DelegatedActionParameterOverrideDef[];
-}
-declare class DomainTypeBuilder {
-	private readonly _id;
-	private readonly _name;
-	private _idLocalizedDisplay?;
-	private _localizedProperties?;
-	private _singleEntry;
-	private _sort?;
-	private _compositeKey?;
-	private readonly _properties;
-	private readonly _delegatedActions;
-	private readonly _parameterErrors;
-	constructor(name: string);
-	get name(): string;
-	singleEntry(): this;
-	/** null explicitly selects reserved-id sorting, including descending order. */
-	sortBy(propertyName: string | null, direction?: "asc" | "desc"): this;
-	/** Keep authored order while resolving names to ids; package validation rejects combining this identity with singleEntry. */
-	compositeKey(first: string, ...rest: readonly string[]): this;
-	idLocalizedDisplay(localizedDisplay: LocalizedDisplaySnapshotDto): this;
-	localizedProperties(localizedProperties: Readonly<Record<string, LocalizedDisplaySnapshotDto>>): this;
-	/** Retain the resource ref until package compilation supplies its owning package; registrations with the same method name replace one another. */
-	delegatedAction(methodName: string, def: DelegatedActionDef): this;
-	/** The builder owns the reserved id property, so authoring it again is rejected. */
-	property(def: PropertyDef): this;
-	property(name: string, type: PropertyTypeDef, options?: PropertyOptions): this;
-	private _rejectReservedPropertyName;
-	/** Both overloads must emit the same property key order because materialized JSON preserves insertion order. */
-	private _pushProperty;
-	/** Preserve unresolved authored names so package validation can identify the bad identity member. */
-	private _resolveIdentityKeys;
-}
 interface DelegatedActionTarget {
 	readonly targetResource: ExternalResourceRefSnapshotDto;
 	readonly targetActionKey: string;
+}
+type PublishedDelegatedActionParameters = Readonly<Record<string, {
+	readonly type: string;
+	readonly required: boolean;
+}>>;
+interface PublishedDelegatedAction {
+	readonly targetResource: Omit<ExternalResourceRefSnapshotDto, "resourceKind"> & {
+		readonly resourceKind: string;
+	};
+	readonly targetActionKey: string;
+	/**
+	 * What a button's `args` gives; the method fills every other parameter of the action. Absent for an action that does not resolve
+	 * or is blocked, for the actions of inline schemas, and from older surfaces.
+	 */
+	readonly parameters?: PublishedDelegatedActionParameters;
+}
+interface PublishedUiComponentItem {
+	readonly kind: string;
+	readonly name: string;
+	readonly packageId: string;
+	readonly method?: string;
 }
 interface PublishedInlineElementSchema {
 	readonly properties: Readonly<Record<string, string>>;
 	readonly elementKey: readonly string[] | null;
 	readonly delegatedActions?: DependencySurfaceType["delegatedActions"];
 	readonly inlineSchemas?: Readonly<Record<string, PublishedInlineElementSchema>>;
+	readonly uiComponents?: Readonly<Record<string, PublishedUiComponentItem>>;
+}
+interface PublishedPropertyDetail {
+	readonly type: string;
+	/** `always`, `never` or `conditional`. */
+	readonly requirement: string;
+	/** `none`, `masterData`, `userData` or `assetDelivery`. */
+	readonly bindingHint: string;
+	readonly display?: LocalizedDisplaySnapshotDto;
+}
+interface PublishedTransformParameter {
+	readonly type: string;
+	readonly required: boolean;
+	readonly description?: string;
+}
+interface PublishedTransformSignature {
+	readonly category: string;
+	readonly parameters: Readonly<Record<string, PublishedTransformParameter>>;
 }
 interface DependencySurfaceType {
 	/** Keep the declaring id for direct-source links even when canonical identity belongs to another package. */
@@ -546,21 +109,41 @@ interface DependencySurfaceType {
 	readonly canonicalTypeId: string;
 	/** Effective names and IDs, including inherited and aliased properties, for read-only lookup. */
 	readonly properties: Readonly<Record<string, string>>;
+	/** Absent from surfaces written before property details were published. */
+	readonly propertyDetails?: Readonly<Record<string, PublishedPropertyDetail>>;
 	/** Effective action targets include inherited registrations selected by compilation. */
-	readonly delegatedActions?: Readonly<Record<string, {
-		readonly targetResource: Omit<ExternalResourceRefSnapshotDto, "resourceKind"> & {
-			readonly resourceKind: string;
-		};
-		readonly targetActionKey: string;
-	}>>;
+	readonly delegatedActions?: Readonly<Record<string, PublishedDelegatedAction>>;
 	/** Each owned schema is nested under its declaring property, never a separate type. */
 	readonly inlineSchemas?: Readonly<Record<string, PublishedInlineElementSchema>>;
+	/**
+	 * The effective row order in an overlay's `sort` form: `key` null for the id, `direction` `asc` or `desc` (a string, as JSON imports
+	 * widen it). Absent for id ascending and from older surfaces.
+	 */
+	readonly sort?: {
+		readonly key: string | null;
+		readonly direction: string;
+	};
+	/**
+	 * Ids of the rows the package itself ships of the type, sorted; empty when it ships none. Other packages of the lineage list
+	 * theirs in their own surfaces. Absent from surfaces written before rows were published.
+	 */
+	readonly shippedRowIds?: readonly string[];
+	/**
+	 * The UI items of the type by class name, the dependency's own and those of the packages it overlays. Code generation gives
+	 * every item of a lineage a class named after the type's one generated name, so an overlay's item replaces an item of the
+	 * same class name. Absent from surfaces written before UI components were published.
+	 */
+	readonly uiComponents?: Readonly<Record<string, PublishedUiComponentItem>>;
 }
-export interface DependencySurface {
+interface DependencySurface {
 	readonly schemaVersion: number;
 	readonly packageId: string;
 	readonly types: Readonly<Record<string, DependencySurfaceType>>;
+	/** Ids of the rows the package ships of a dependency's type it does not declare, keyed `<canonicalPackageId>:<canonicalTypeId>`. */
+	readonly shippedRowsOfDependencyTypes?: Readonly<Record<string, readonly string[]>>;
 	readonly actionTransforms: Readonly<Record<string, string>>;
+	/** Absent from surfaces written before signatures were published; `transformCall` refuses those. */
+	readonly actionTransformSignatures?: Readonly<Record<string, PublishedTransformSignature>>;
 	/** Use service.modelName coordinates to distinguish resources with the same model name in different services. */
 	readonly masterDataResources: Readonly<Record<string, string>>;
 }
@@ -573,366 +156,35 @@ interface DependencyOverlaySource {
 		readonly domainTypeId: string;
 	};
 }
-interface DependencyOverlayOptions<TPublished extends Readonly<Record<string, string>> = Readonly<Record<string, string>>> {
-	readonly source: DependencyOverlaySource;
-	readonly singleEntry: boolean;
-	/** Overlay sources expose their additions only; inherited names must be read from the surface that declares them. */
-	readonly publishedProperties: TPublished;
-	/** Carry structural action targets so component buttons can be authored by method name. */
-	readonly publishedDelegatedActions: Readonly<Record<string, DelegatedActionTarget>>;
-	readonly publishedInlineSchemas?: Readonly<Record<string, PublishedInlineElementSchema>>;
+interface BindingSourceScopeSpec {
+	readonly kind: "parent" | "dependencyResource";
+	readonly sourcePackageId?: string;
+	readonly resourceKind?: "masterData" | "userData";
+	readonly resourceId?: string;
 }
-/** Carry the full source so attachments can synthesize an overlay without writing into dependency files; authored rows use its canonical id directly. */
-export interface DependencyDomainTypeRef<TPublished extends Readonly<Record<string, string>> = Readonly<Record<string, string>>> extends DependencyOverlayOptions<TPublished> {
-	readonly kind: "dependencyDomainType";
-	readonly packageId: string;
-	readonly typeName: string;
-}
-type TypeNames<S extends DependencySurface> = keyof S["types"] & string;
-type PublishedPropertiesOf<T> = Readonly<Record<PropertyNames<T>, string>>;
-type DelegatedActionNames<T> = T extends {
-	readonly delegatedActions?: infer A;
-} ? [
-	A
-] extends [
-	undefined
-] ? never : keyof NonNullable<A> & string : never;
-type PropertyNames<T> = T extends {
-	readonly properties: infer P;
-} ? keyof P & string : never;
-interface DependencyPackage<S extends DependencySurface> {
-	readonly packageId: S["packageId"];
-	/** Inherit singleEntry from the source so an authored overlay cannot restate it inconsistently. */
-	overlay<K extends TypeNames<S>>(typeName: K): DependencyOverlayOptions<PublishedPropertiesOf<S["types"][K]>>;
-	type<K extends TypeNames<S>>(typeName: K): DependencyDomainTypeRef<PublishedPropertiesOf<S["types"][K]>>;
-	/** Return the declaring id for direct references; canonical row identity is carried by type().source.canonicalType.domainTypeId. */
-	typeId(typeName: TypeNames<S>): string;
-	propertyId<K extends TypeNames<S>>(typeName: K, propertyName: PropertyNames<S["types"][K]>): string;
-	/** Resolve the published action coordinates instead of fabricating one for an unknown method. */
-	delegatedActionTarget<K extends TypeNames<S>>(typeName: K, methodName: DelegatedActionNames<S["types"][K]>): DelegatedActionTarget;
-	resourceId(key: keyof S["masterDataResources"] & string): string;
-	transformId(name: keyof S["actionTransforms"] & string): string;
-	elementPropertyId<K extends TypeNames<S>>(typeName: K, propertyPath: readonly [
-		string,
-		...string[]
-	], propertyName: string): string;
-	inlineElements<K extends TypeNames<S>>(typeName: K, listPropertyName: InlineListNames<S["types"][K]>, elements: readonly Readonly<Record<string, InlineElementValue>>[]): readonly Readonly<Record<string, InlineElementValue>>[];
-}
-type InlineElementValue = FileDomainPropertyValueDto;
-type InlineListNames<T> = T extends {
-	readonly inlineSchemas?: infer L;
-} ? [
-	L
-] extends [
-	undefined
-] ? never : keyof NonNullable<L> & string : never;
-export declare function dependencyPackage<S extends DependencySurface>(surface: S): DependencyPackage<S>;
-type DslDomainTypeMountPathDto = {
-	readonly kind: "local";
-	readonly typeName: string;
-	readonly typeId?: string;
-} | {
-	readonly kind: "dependency";
-	readonly firstHopPackageId: string;
-	readonly typeName: string;
-	readonly typeId?: string;
-};
-type DslMountPathDto = DslDomainTypeMountPathDto | {
-	readonly kind: "inlineElement";
-	readonly host: DslDomainTypeMountPathDto;
-	readonly dependencyRef?: DependencyDomainTypeRef;
-	readonly propertyPath: readonly [
-		string,
-		...string[]
-	];
-};
-interface DslRefChainEntryDto {
-	readonly refPropertyId: string;
-	readonly targetMountPath: DslDomainTypeMountPathDto;
-}
-interface DslBindingSourceDto {
-	readonly scopes: readonly ({
-		readonly kind: "parent";
-		readonly parentResourceId: string;
-	} | {
-		readonly kind: "dependencyResource";
-		readonly sourcePackageId: string;
-		readonly resourceKind: "masterData" | "userData";
-		readonly resourceId: string;
-	})[];
-	readonly terminal: {
-		readonly kind: "direct";
-		readonly mountPath: DslMountPathDto;
-		readonly propertyId: string;
-	} | {
-		readonly kind: "idRef";
-		readonly originTypeName: string;
-		readonly refChain: readonly [
-			DslRefChainEntryDto,
-			...DslRefChainEntryDto[]
-		];
-		readonly propertyId: string;
-	};
-}
-type DslDomainPropertySourceDto = DslBindingSourceDto;
-type DslTransformArgumentSourceDto = {
-	readonly kind: "static";
-	readonly value: JsonValue;
-} | {
-	readonly kind: "domainProperty";
-	readonly source: DslBindingSourceDto;
-} | {
-	readonly kind: "actionLiteral";
-	readonly value: JsonValue;
-} | TransformReferenceSnapshotDto<DslTransformArgumentDto> | {
-	readonly kind: "placeholder";
-	readonly value: string;
-};
-interface DslTransformArgumentDto extends TransformArgumentEnvelopeSnapshotDto<DslTransformArgumentSourceDto> {
-}
-interface DslTransformEntryDto extends TransformCallSnapshotDto<DslTransformArgumentDto> {
-}
-type DslRuntimeValueBindingDto = {
-	readonly kind: "static";
-	readonly parameterName: string;
-	readonly value: JsonValue;
-} | {
-	readonly kind: "domainProperty";
-	readonly parameterName: string;
-	readonly source: DslDomainPropertySourceDto;
-} | {
-	readonly kind: "skip";
-	readonly parameterName: string;
-} | {
-	readonly kind: "expression";
-	readonly parameterName: string;
-	readonly expression: string;
-} | {
-	readonly kind: "domainProperties";
-	readonly parameterName: string;
-	readonly sources: readonly DslBindingSourceDto[];
-} | {
-	readonly kind: "resourceKey";
-	readonly parameterName: string;
-} | {
-	readonly kind: "placeholder";
-	readonly parameterName: string;
-	readonly value: string;
-};
-type DslActionProgramDto = {
-	readonly kind: "concrete";
-	readonly actionName: string;
-	readonly requestBindings: readonly DslRuntimeValueBindingDto[];
-} | {
-	readonly kind: "domainProperty";
-	readonly source?: DslBindingSourceDto;
-} | {
-	readonly kind: "transform";
-	readonly invocation: DslTransformEntryDto;
-} | {
-	readonly kind: "transformEntries";
-	readonly entries: readonly DslTransformEntryDto[];
-};
-type DslActionProgramInput = (Omit<Extract<DslActionProgramDto, {
-	readonly kind: "concrete";
-}>, "requestBindings"> & {
-	readonly requestBindings: UntypedBindingRecord;
-}) | Exclude<DslActionProgramDto, {
-	readonly kind: "concrete";
-}>;
-/** Author a program directly, independently of its destination's parameter name. */
-export declare const ActionProgram: {
-	readonly concrete: (actionName: string, requestBindings: UntypedBindingRecord) => DslActionProgramInput;
-	readonly domainProperty: (source?: DslBindingSourceDto) => DslActionProgramInput;
-	readonly transform: (transformPackageId: string, transformId: string, args: readonly DslTransformArgumentDto[]) => DslActionProgramInput;
-	readonly transformEntries: (entries: readonly DslTransformEntryDto[]) => DslActionProgramInput;
-};
-interface OverlayTypeSpecOptions {
-	readonly source: DependencyOverlaySource;
-	/** Package validation rejects combining singleEntry with a composite-key override because they define conflicting identities. */
-	readonly singleEntry?: boolean;
-	/** Resolve declared and source-published names before accepting a stable property id; unknown names collect errors. Inherited membership still needs the dependency closure. */
-	readonly sort?: {
-		readonly key: string | null;
-		readonly direction?: "asc" | "desc";
-	};
-	/** Resolve override members through the same slots as sort keys; only checks independent of the dependency closure can run here. */
-	readonly compositeKeyMode?: {
-		readonly kind: "inherit";
-	} | {
-		readonly kind: "suppress";
-	} | {
-		readonly kind: "override";
-		readonly members: readonly string[];
-	};
-	/** Obtain these names from the dependency surface; hand-written metadata would make the resolver trust declarations this package does not own. */
-	readonly publishedProperties?: Readonly<Record<string, string>>;
-	readonly publishedInlineSchemas?: Readonly<Record<string, PublishedInlineElementSchema>>;
-	/** Retain published action coordinatess so component method names can resolve without local action declarations. */
-	readonly publishedDelegatedActions?: Readonly<Record<string, DelegatedActionTarget>>;
-	/** Keep inherited alias keys as source ids so renaming their display text cannot change identity. */
-	readonly renamedInheritedProperties?: Readonly<Record<string, string>>;
-	/** Resolve targets and nested argument properties against declared and published slots; unresolved names must produce diagnostics. */
-	readonly actionPropertyTransforms?: readonly OverlayActionPropertyTransformDef[];
-	readonly declared?: readonly {
-		readonly name: string;
-		readonly type: PropertyTypeDef;
-		readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
-		readonly requirement?: FileRequirementDto;
-		readonly bindingHint?: BindingHintKind;
-	}[];
-	/** Defer target refs until resources have ids so overlays can use the same forward references as local types. */
-	readonly delegatedActions?: readonly {
-		readonly methodName: string;
-		readonly def: DelegatedActionDef;
-	}[];
-}
-type OverlayActionPropertyTransformMode = "replace" | "append";
-interface OverlayActionPropertyTransformDef {
-	readonly targetProperty: string;
-	readonly mode?: OverlayActionPropertyTransformMode;
-	readonly transformPackageId: string;
-	readonly transformId: string;
-	readonly arguments: readonly DomainTypeTransformArgumentDef[];
-}
-type Whitespace = " " | "\t" | "\n" | "\r";
-type TrimLeft<S extends string> = S extends `${Whitespace}${infer R}` ? TrimLeft<R> : S;
-type TrimRight<S extends string> = S extends `${infer R}${Whitespace}` ? TrimRight<R> : S;
-type Trim<S extends string> = TrimLeft<TrimRight<S>>;
-type EmptyTypedProps = Record<never, FileDomainPropertyValueDto>;
-type LocalizedPropertyDisplayMap<TProps extends Record<string, FileDomainPropertyValueDto>, TIncludeId extends boolean = true> = (TIncludeId extends true ? {
-	readonly id: LocalizedDisplaySnapshotDto;
-} : Record<never, never>) & {
-	readonly [K in Extract<keyof TProps, string>]: LocalizedDisplaySnapshotDto;
-};
-type NextDomainTypeProps<TProps extends Record<string, FileDomainPropertyValueDto>, N extends string, V extends FileDomainPropertyValueDto, R extends boolean> = TProps & (R extends true ? {
-	readonly [K in N]: V;
-} : {
-	readonly [K in N]?: V;
-});
-type NonReservedPropertyDef<N extends string, V extends FileDomainPropertyValueDto, R extends boolean> = Trim<N> extends "id" ? never : PropertyDef<N, V, R>;
-declare class TypedDomainTypeBuilder<TProps extends Record<string, FileDomainPropertyValueDto> = EmptyTypedProps> {
-	idLocalizedDisplay(localizedDisplay: LocalizedDisplaySnapshotDto): this;
-	singleEntry(): this;
-	sortBy(propertyName: Extract<keyof TProps, string> | "id" | null, direction?: "asc" | "desc"): this;
-	compositeKey(first: Extract<keyof TProps, string>, ...rest: readonly Extract<keyof TProps, string>[]): this;
-	localizedProperties(localizedProperties: LocalizedPropertyDisplayMap<TProps>): this;
-	/** Static rejection covers reserved literal names; package validation is still needed for dynamically authored names. */
-	property<N extends string, V extends FileDomainPropertyValueDto, R extends boolean>(def: NonReservedPropertyDef<N, V, R>): TypedDomainTypeBuilder<NextDomainTypeProps<TProps, N, V, R>>;
-	delegatedAction(methodName: string, def: DelegatedActionDef): this;
-}
-declare class TypedOverlayDomainTypeBuilder<TProps extends Record<string, FileDomainPropertyValueDto> = EmptyTypedProps> {
-	property<N extends string, V extends FileDomainPropertyValueDto, R extends boolean>(def: NonReservedPropertyDef<N, V, R>): TypedOverlayDomainTypeBuilder<NextDomainTypeProps<TProps, N, V, R>>;
-	localizedProperties(localizedProperties: LocalizedPropertyDisplayMap<TProps, false>): this;
-}
-type DslUiLiteralValue = string | number | boolean | null;
-type DslUiValueSourceDto = {
-	readonly kind: "property";
+interface BindingSourceDirectTerminal {
+	readonly kind: "direct";
+	readonly target: MountTarget;
 	readonly propertyName: string;
 }
-/** Accept an inherited PropertyId directly when the single-package build has no published name for it. */
- | {
-	readonly kind: "inheritedProperty";
-	readonly propertyId: string;
-} | {
-	readonly kind: "literal";
-	readonly value: DslUiLiteralValue;
-};
-type DslUiPropertySourceDto = Extract<DslUiValueSourceDto, {
-	kind: "property";
-} | {
-	kind: "inheritedProperty";
-}>;
-type DslUiTableBandTableRefDto = {
-	readonly by: "name";
-	readonly sourceDomainTypeName: string;
-	readonly tablePropertyName: string;
-} | {
-	readonly by: "id";
-	readonly sourceDomainTypeId: string;
-	readonly tablePropertyId: string;
-};
-type DslUiTableBandEdge = "lower" | "upper";
-interface DslUiTableBandSourceDto {
-	readonly kind: "tableBand";
-	readonly table: DslUiTableBandTableRefDto;
-	/** Resolve position on the component target, independently of the type that owns the table. */
-	readonly position: DslUiPropertySourceDto;
-	readonly edge: DslUiTableBandEdge;
+interface BindingSourceIdRefHop {
+	readonly refPropertyName: string;
+	readonly target: LazyDomainTypeTarget;
 }
-type DslUiGaugeBoundSourceDto = DslUiValueSourceDto | DslUiTableBandSourceDto;
-type DslUiImageMode = UiImageModeSnapshotDto;
-type DslUiConditionDto = {
-	readonly kind: "truthy";
-	readonly source: DslUiValueSourceDto;
-} | {
-	readonly kind: "comparison";
-	readonly operator: ComparisonOperatorSnapshotDto;
-	readonly lhs: DslUiValueSourceDto;
-	readonly rhs: DslUiValueSourceDto;
-} | {
-	readonly kind: "and";
-	readonly children: readonly DslUiConditionDto[];
-} | {
-	readonly kind: "or";
-	readonly children: readonly DslUiConditionDto[];
-} | {
-	readonly kind: "not";
-	readonly child: DslUiConditionDto;
-} | {
-	readonly kind: "rowElement";
-	readonly sourceDomainTypeName: string;
-	readonly sourcePropertyPath?: readonly [
-		string,
-		...string[]
+interface BindingSourceIdRefTerminal {
+	readonly kind: "idRef";
+	readonly origin: LazyDomainTypeTarget;
+	readonly refChain: readonly [
+		BindingSourceIdRefHop,
+		...BindingSourceIdRefHop[]
 	];
-	/** A dependency ref lets the builder host the parent type and resolve list names from its published surface. */
-	readonly dependencyType?: DependencyDomainTypeRef;
-	readonly list: DslUiRowElementListDto;
-};
-type DslUiRowElementListDto = {
-	readonly by: "name";
-	readonly listPropertyName: string;
-} | {
-	readonly by: "id";
-	readonly propertyId: string;
-};
-type PackageDisplayEntryDraft = LocalizedDisplaySnapshotDto;
-declare const DOMAIN_TYPE_PROPERTIES: unique symbol;
-declare const DOMAIN_TYPE_PUBLISHED: unique symbol;
-interface DomainTypeDefinitionBase<TName extends string, TProps extends Record<string, FileDomainPropertyValueDto>, TPublished extends Record<string, FileDomainPropertyValueDto>> {
-	readonly typeName: TName;
-	readonly [DOMAIN_TYPE_PROPERTIES]: TProps;
-	readonly [DOMAIN_TYPE_PUBLISHED]: TPublished;
+	readonly propertyName: string;
 }
-interface LocalDomainTypeDefinition<TName extends string = string, TProps extends Record<string, FileDomainPropertyValueDto> = Record<string, FileDomainPropertyValueDto>> extends DomainTypeDefinitionBase<TName, TProps, EmptyTypedProps> {
-	readonly definitionKind: "local";
+interface BindingSourceSpec {
+	readonly scopes: readonly BindingSourceScopeSpec[];
+	readonly terminal: BindingSourceDirectTerminal | BindingSourceIdRefTerminal;
 }
-interface OverlayDomainTypeDefinition<TName extends string = string, TProps extends Record<string, FileDomainPropertyValueDto> = Record<string, FileDomainPropertyValueDto>, TPublished extends Record<string, FileDomainPropertyValueDto> = EmptyTypedProps> extends DomainTypeDefinitionBase<TName, TProps, TPublished> {
-	readonly definitionKind: "overlay";
-}
-type DomainTypeDefinition<TName extends string = string, TProps extends Record<string, FileDomainPropertyValueDto> = Record<string, FileDomainPropertyValueDto>, TPublished extends Record<string, FileDomainPropertyValueDto> = EmptyTypedProps> = LocalDomainTypeDefinition<TName, TProps> | OverlayDomainTypeDefinition<TName, TProps, TPublished>;
-type OverlayDomainTypeOptions = Omit<OverlayTypeSpecOptions, "declared">;
-type PublishedProps<TOptions> = TOptions extends {
-	readonly publishedProperties: infer TPublished;
-} ? {
-	readonly [K in keyof TPublished & string]: FileDomainPropertyValueDto;
-} : EmptyTypedProps;
-export declare function defineDomainType<TName extends string, TProps extends Record<string, FileDomainPropertyValueDto>>(name: TName, define: (domainType: TypedDomainTypeBuilder<EmptyTypedProps>) => TypedDomainTypeBuilder<TProps>): LocalDomainTypeDefinition<TName, TProps>;
-export declare function defineOverlayDomainType<TName extends string, TOptions extends OverlayDomainTypeOptions>(name: TName, options: TOptions): OverlayDomainTypeDefinition<TName, EmptyTypedProps, PublishedProps<TOptions>>;
-export declare function defineOverlayDomainType<TName extends string, TOptions extends OverlayDomainTypeOptions, TProps extends Record<string, FileDomainPropertyValueDto>>(name: TName, options: TOptions, define: (domainType: TypedOverlayDomainTypeBuilder<EmptyTypedProps>) => TypedOverlayDomainTypeBuilder<TProps>): OverlayDomainTypeDefinition<TName, TProps, PublishedProps<TOptions>>;
-type InlineElementHost = string | DomainTypeDefinition | DependencyDomainTypeRef;
-interface InlineElementReference {
-	readonly kind: "inlineElementReference";
-	readonly host: InlineElementHost;
-	readonly propertyPath: readonly [
-		string,
-		...string[]
-	];
-}
-export declare function inlineElementOf<TName extends string, TProps extends Record<string, FileDomainPropertyValueDto>, TPublished extends Record<string, FileDomainPropertyValueDto>>(host: DomainTypeDefinition<TName, TProps, TPublished>, firstPropertyName: Extract<keyof (TProps & TPublished), string>, ...nestedPropertyNames: readonly string[]): InlineElementReference;
-export declare function inlineElementOf(host: string | DependencyDomainTypeRef, firstPropertyName: string, ...nestedPropertyNames: readonly string[]): InlineElementReference;
-type StaticBindingDirective<T = unknown> = {
+export type StaticBindingDirective<T = unknown> = {
 	readonly __brand: "BindingDirective";
 	readonly kind: "static";
 	readonly value: T;
@@ -941,10 +193,10 @@ type RuntimeBindingDirective = {
 	readonly __brand: "BindingDirective";
 } & ({
 	readonly kind: "domainProperty";
-	readonly source: DslDomainPropertySourceDto;
+	readonly source: BindingSourceSpec;
 } | {
 	readonly kind: "domainPropertyKey";
-	readonly source: DslDomainPropertySourceDto;
+	readonly source: BindingSourceSpec;
 	readonly suffix: string;
 } | {
 	readonly kind: "skip";
@@ -960,62 +212,374 @@ type RuntimeBindingDirective = {
 	readonly value: string;
 } | {
 	readonly kind: "domainProperties";
-	readonly sources: readonly DslBindingSourceDto[];
+	readonly sources: readonly BindingSourceSpec[];
 });
-type StaticBindingValue<T> = T extends readonly (infer Item)[] ? readonly StaticBindingValue<Item>[] | null : T extends object ? {
+type StaticBindingValueInner<T> = T extends readonly (infer Item)[] ? readonly StaticBindingValue<Item>[] | null : T extends object ? {
 	readonly [K in keyof T]: StaticBindingValue<T[K]>;
 } | null : T | null;
+type StaticBindingValue<T> = StaticBindingValueInner<Exclude<T, undefined>>;
 type BindingDirective<T = unknown> = StaticBindingDirective<StaticBindingValue<T>> | RuntimeBindingDirective;
 type BindingRecord<S> = {
 	readonly [K in keyof S & string]?: NonNullable<S[K]> extends readonly unknown[] ? BindingDirective<S[K]> : NonNullable<S[K]> extends object ? BindingDirective<S[K]> | BindingRecord<NonNullable<S[K]>> : BindingDirective<S[K]>;
+};
+type UntypedBindingRecord = {
+	readonly [parameterName: string]: BindingDirective | UntypedBindingRecord | undefined;
 };
 type ArrayPropertyNameOf<S> = keyof {
 	[K in keyof S & string as NonNullable<S[K]> extends readonly unknown[] ? K : never]: 0;
 } & string;
 interface SourceHelper {
-	direct(typeName: string, propertyName: string): DslBindingSourceDto;
-	direct(reference: InlineElementReference, propertyName: string): DslBindingSourceDto;
-	direct<TName extends string, TProps extends Record<string, FileDomainPropertyValueDto>>(definition: DomainTypeDefinition<TName, TProps>, propertyName: Extract<keyof TProps, string> | "id"): DslBindingSourceDto;
-	/** Dependency properties must resolve through published names because this package cannot inspect their declarations. */
-	direct(dependencyType: DependencyDomainTypeRef, propertyName: string): DslBindingSourceDto;
-	/** Retain the origin type because the first ref property cannot be resolved from its target mount. */
-	idRef(typeName: string, refChain: readonly [
-		{
-			refPropertyName: string;
-			targetTypeName: string;
-		},
-		...{
-			refPropertyName: string;
-			targetTypeName: string;
-		}[]
-	], propertyName: string): DslBindingSourceDto;
-	parent(innerSource: DslBindingSourceDto): DslBindingSourceDto;
-	dependencyResource(sourcePackageId: string, resourceKind: "masterData" | "userData", resourceId: string, innerSource: DslBindingSourceDto): DslBindingSourceDto;
+	direct<TName extends string, TProps extends InstanceValues>(target: LocalDomainTypeDef<TName, TProps>, propertyName: Extract<keyof TProps, string> | "id"): BindingSourceSpec;
+	direct<TName extends string, TProps extends InstanceValues, TPublished extends InstanceValues>(target: OverlayDomainTypeDef<TName, TProps, TPublished>, propertyName: Extract<keyof TProps | keyof TPublished, string> | "id" | (string & {})): BindingSourceSpec;
+	direct(target: DependencyDomainTypeRef | InlineElementReference, propertyName: string): BindingSourceSpec;
+	direct(target: () => DomainTypeDef | DependencyDomainTypeRef, propertyName: string): BindingSourceSpec;
+	idRef(origin: LazyDomainTypeTarget, refChain: readonly [
+		BindingSourceIdRefHop,
+		...BindingSourceIdRefHop[]
+	], propertyName: string): BindingSourceSpec;
+	parent(innerSource: BindingSourceSpec): BindingSourceSpec;
+	dependencyResource(sourcePackageId: string, resourceKind: "masterData" | "userData", resourceId: string, innerSource: BindingSourceSpec): BindingSourceSpec;
 }
 export declare const Source: SourceHelper;
 type WidenLiteral<T> = T extends string ? string : T extends number ? number : T extends boolean ? boolean : T;
 export declare const Bind: {
 	readonly static: <T>(value: T) => StaticBindingDirective<WidenLiteral<T>>;
-	readonly domainProperty: (source: DslDomainPropertySourceDto) => RuntimeBindingDirective;
-	/** This user-data key is forward-only: appending a suffix must not write the derived value back into the source property. */
-	readonly domainPropertyKey: (source: DslDomainPropertySourceDto, suffix: string) => RuntimeBindingDirective;
+	readonly domainProperty: (source: BindingSourceSpec) => RuntimeBindingDirective;
+	readonly domainPropertyKey: (source: BindingSourceSpec, suffix: string) => RuntimeBindingDirective;
 	readonly skip: () => RuntimeBindingDirective;
 	readonly null: () => RuntimeBindingDirective;
-	/** Preserve the requested key union without a cast. Partial permits incremental construction and matches the optional keys in BindingRecord. */
 	readonly nulls: <TName extends string>(...parameterNames: readonly TName[]) => Partial<Record<TName, RuntimeBindingDirective>>;
 	readonly expression: (expression: string) => RuntimeBindingDirective;
-	/** Restrict this to master-data runtime bindings; user-data declared bindings reject it at the schema gate. */
 	readonly resourceKey: () => RuntimeBindingDirective;
-	/** Restrict this to master-data runtime bindings; user-data declared bindings reject it at the schema gate. */
 	readonly placeholder: (value: string) => RuntimeBindingDirective;
-	readonly domainProperties: (sources: readonly DslBindingSourceDto[]) => RuntimeBindingDirective;
+	readonly domainProperties: (sources: readonly BindingSourceSpec[]) => RuntimeBindingDirective;
+};
+type TransformTargetSpec = {
+	readonly kind: "local";
+	readonly transform: LazyActionTransformRef;
+} | {
+	readonly kind: "selected";
+	readonly transformPackageId: string;
+	readonly transformId: string;
+};
+type TransformArgumentSourceSpec = {
+	readonly kind: "static";
+	readonly value: JsonValue;
+} | {
+	readonly kind: "domainProperty";
+	readonly source: BindingSourceSpec;
+} | {
+	readonly kind: "actionLiteral";
+	readonly value: JsonValue;
+} | {
+	readonly kind: "placeholder";
+	readonly value: string;
+} | {
+	readonly kind: "actionTransformRef";
+	readonly invocation: TransformInvocationSpec;
+};
+interface TransformArgumentSpec {
+	readonly parameterName: string;
+	readonly source: TransformArgumentSourceSpec;
+}
+interface TransformInvocationSpec {
+	readonly target: TransformTargetSpec;
+	readonly arguments: readonly TransformArgumentSpec[];
+}
+type ActionProgramInput = {
+	readonly kind: "concrete";
+	readonly actionName: string;
+	readonly requestBindings: UntypedBindingRecord;
+} | {
+	readonly kind: "domainProperty";
+	readonly source?: BindingSourceSpec;
+} | {
+	readonly kind: "transform";
+	readonly invocation: TransformInvocationSpec;
+} | {
+	readonly kind: "transformEntries";
+	readonly entries: readonly TransformInvocationSpec[];
 };
 export declare const Arg: {
-	readonly static: (parameterName: string, value: JsonValue) => DslTransformArgumentDto;
-	readonly domainProperty: (parameterName: string, source: DslBindingSourceDto) => DslTransformArgumentDto;
-	readonly actionLiteral: (parameterName: string, value: JsonValue) => DslTransformArgumentDto;
-	readonly actionTransformRef: (parameterName: string, transformPackageId: string, transformId: string, args: readonly DslTransformArgumentDto[]) => DslTransformArgumentDto;
-	readonly placeholder: (parameterName: string, value: string) => DslTransformArgumentDto;
+	readonly static: (parameterName: string, value: JsonValue) => TransformArgumentSpec;
+	readonly domainProperty: (parameterName: string, source: BindingSourceSpec) => TransformArgumentSpec;
+	readonly actionLiteral: (parameterName: string, value: JsonValue) => TransformArgumentSpec;
+	readonly actionTransformRef: (parameterName: string, targetOrPackageId: LazyActionTransformRef | string, transformIdOrArgs: string | readonly TransformArgumentSpec[], maybeArgs?: readonly TransformArgumentSpec[]) => TransformArgumentSpec;
+	readonly placeholder: (parameterName: string, value: string) => TransformArgumentSpec;
+};
+export declare const ActionProgram: {
+	readonly concrete: (actionName: string, requestBindings: UntypedBindingRecord) => ActionProgramInput;
+	readonly domainProperty: (source?: BindingSourceSpec) => ActionProgramInput;
+	readonly transform: (targetOrPackageId: LazyActionTransformRef | string, transformIdOrArgs: string | readonly TransformArgumentSpec[], maybeArgs?: readonly TransformArgumentSpec[]) => ActionProgramInput;
+	readonly transformEntry: (targetOrPackageId: LazyActionTransformRef | string, transformIdOrArgs: string | readonly TransformArgumentSpec[], maybeArgs?: readonly TransformArgumentSpec[]) => TransformInvocationSpec;
+	readonly transformEntries: (entries: readonly TransformInvocationSpec[]) => ActionProgramInput;
+};
+type OutputParameterMappingSpec = {
+	readonly kind: "parameter";
+	readonly sourceParameter: string;
+} | {
+	readonly kind: "static";
+	readonly value: JsonValue;
+} | {
+	readonly kind: "placeholder";
+	readonly value: string;
+} | {
+	readonly kind: "resourceKey";
+} | {
+	readonly kind: "mountedResourceProperty";
+	readonly resource: AnyResourceRef | ExternalResourceRefSpec;
+	readonly keyPropertyName?: string;
+};
+export declare const OutputMap: {
+	readonly parameter: (sourceParameter: string) => OutputParameterMappingSpec;
+	readonly static: (value: JsonValue) => OutputParameterMappingSpec;
+	readonly placeholder: (value: string) => OutputParameterMappingSpec;
+	readonly resourceKey: () => OutputParameterMappingSpec;
+	readonly mountedResourceProperty: (resource: AnyResourceRef | ExternalResourceRefSpec, keyPropertyName?: string) => OutputParameterMappingSpec;
+};
+type DelegatedActionTarget$1 = DelegatedActionTarget;
+type PublishedInlineElementSchema$1 = PublishedInlineElementSchema;
+type DependencySurface$1 = DependencySurface;
+type DependencyOverlaySource$1 = DependencyOverlaySource;
+interface DependencyOverlayOptions<TPublished extends Readonly<Record<string, string>> = Readonly<Record<string, string>>> {
+	readonly source: DependencyOverlaySource$1;
+	readonly singleEntry?: boolean;
+	/** Overlay sources expose their additions only; inherited names must be read from the surface that declares them. */
+	readonly publishedProperties?: TPublished;
+	/** Carry structural action targets so component buttons can be authored by method name. */
+	readonly publishedDelegatedActions?: Readonly<Record<string, DelegatedActionTarget$1>>;
+	readonly publishedInlineSchemas?: Readonly<Record<string, PublishedInlineElementSchema$1>>;
+}
+/** Carry the full source so attachments can synthesize an overlay without writing into dependency files; authored rows use its canonical id directly. */
+export interface DependencyDomainTypeRef<TPublished extends Readonly<Record<string, string>> = Readonly<Record<string, string>>> extends DependencyOverlayOptions<TPublished> {
+	readonly kind: "dependencyDomainType";
+	readonly packageId: string;
+	readonly typeName: string;
+	readonly singleEntry: boolean;
+	readonly publishedProperties: TPublished;
+	readonly publishedDelegatedActions: Readonly<Record<string, DelegatedActionTarget$1>>;
+}
+type TypeNames<S extends DependencySurface$1> = keyof S["types"] & string;
+type PublishedPropertiesOf<T> = Readonly<Record<PropertyNames<T>, string>>;
+type DelegatedActionNames<T> = T extends {
+	readonly delegatedActions?: infer A;
+} ? [
+	A
+] extends [
+	undefined
+] ? never : keyof NonNullable<A> & string : never;
+type PropertyNames<T> = T extends {
+	readonly properties: infer P;
+} ? keyof P & string : never;
+/** The call part of an overlay's `actionPropertyTransforms` entry; spread it beside `targetProperty` and `mode`. */
+export interface TransformCall {
+	readonly transformPackageId: string;
+	readonly transformId: string;
+	readonly arguments: readonly DomainTypeTransformArgumentDef[];
+}
+type TransformParameters<S, N extends string> = "actionTransformSignatures" extends keyof S ? NonNullable<S[keyof S & "actionTransformSignatures"]> extends Readonly<Record<N, {
+	readonly parameters: infer P;
+}>> ? P : never : never;
+type TransformArguments<S, N extends string, TSource> = ([
+	TransformParameters<S, N>
+] extends [
+	never
+] ? never : unknown) & ([
+	keyof TransformParameters<S, N> & string
+] extends [
+	never
+] ? {
+	readonly [name: string]: never;
+} : {
+	readonly [K in keyof TransformParameters<S, N> & string]?: TSource;
+});
+interface DependencyPackage<S extends DependencySurface$1> {
+	readonly packageId: S["packageId"];
+	/** Inherit singleEntry from the source so an authored overlay cannot restate it inconsistently. */
+	overlay<K extends TypeNames<S>>(typeName: K): DependencyOverlayOptions<PublishedPropertiesOf<S["types"][K]>>;
+	type<K extends TypeNames<S>>(typeName: K): DependencyDomainTypeRef<PublishedPropertiesOf<S["types"][K]>>;
+	/** Return the declaring id for direct references; canonical row identity is carried by type().source.canonicalType.domainTypeId. */
+	typeId(typeName: TypeNames<S>): string;
+	propertyId<K extends TypeNames<S>>(typeName: K, propertyName: PropertyNames<S["types"][K]>): string;
+	/** Resolve the published action coordinates instead of fabricating one for an unknown method. */
+	delegatedActionTarget<K extends TypeNames<S>>(typeName: K, methodName: DelegatedActionNames<S["types"][K]>): DelegatedActionTarget$1;
+	resourceId(key: keyof S["masterDataResources"] & string): string;
+	transformId(name: keyof S["actionTransforms"] & string): string;
+	/**
+	 * Arguments are keyed by parameter name. An unknown name or a missing required parameter throws with the published
+	 * parameters; with an imported surface, an unknown name also fails to compile.
+	 */
+	transformCall<N extends keyof S["actionTransforms"] & string>(name: N, args: TransformArguments<S, N, DomainTypeTransformArgumentSourceDef>): TransformCall;
+	/** The same call as an action program, for `actionProgram` of an action model entry. */
+	transformProgram<N extends keyof S["actionTransforms"] & string>(name: N, args: TransformArguments<S, N, TransformArgumentSourceSpec>): ActionProgramInput;
+	elementPropertyId<K extends TypeNames<S>>(typeName: K, propertyPath: readonly [
+		string,
+		...string[]
+	], propertyName: string): string;
+	inlineElements<K extends TypeNames<S>>(typeName: K, listPropertyName: InlineListNames<S["types"][K]>, elements: readonly Readonly<Record<string, InlineElementValue>>[]): readonly Readonly<Record<string, InlineElementValue>>[];
+}
+type InlineElementValue = FileDomainPropertyValueDto;
+type InlineListNames<T> = T extends {
+	readonly inlineSchemas?: infer L;
+} ? [
+	L
+] extends [
+	undefined
+] ? never : keyof NonNullable<L> & string : never;
+export declare function dependencyPackage<S extends DependencySurface$1>(surface: S): DependencyPackage<S>;
+type UiLiteralValue = string | number | boolean | null;
+type UiImageMode = UiImageModeSnapshotDto;
+type UiTableBandEdge = "lower" | "upper";
+type UiPropertySourceSpec = {
+	readonly kind: "property";
+	readonly propertyName: string;
+} | {
+	readonly kind: "inheritedProperty";
+	readonly propertyId: string;
+};
+type UiTableBandSourceSpec = {
+	readonly kind: "tableBand";
+	readonly table: {
+		readonly by: "target";
+		readonly sourceType: LazyDomainTypeTarget;
+		readonly tablePropertyName: string;
+	} | {
+		readonly by: "id";
+		readonly sourceDomainTypeId: string;
+		readonly tablePropertyId: string;
+	};
+	readonly position: UiPropertySourceSpec;
+	readonly edge: UiTableBandEdge;
+};
+type UiValueSourceSpec = UiPropertySourceSpec | {
+	readonly kind: "literal";
+	readonly value: UiLiteralValue;
+};
+interface UiForeignRowSourceSpec {
+	readonly kind: "foreignRow";
+	readonly target: LazyDomainTypeTarget;
+	readonly rowId: string;
+	readonly propertyName: string;
+}
+type UiConditionOperandSpec = UiValueSourceSpec | UiForeignRowSourceSpec;
+type UiGaugeBoundSourceSpec = UiValueSourceSpec | UiTableBandSourceSpec;
+type UiConditionSpec = {
+	readonly kind: "truthy";
+	readonly source: UiConditionOperandSpec;
+} | {
+	readonly kind: "comparison";
+	readonly operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+	readonly lhs: UiConditionOperandSpec;
+	readonly rhs: UiConditionOperandSpec;
+} | {
+	readonly kind: "and";
+	readonly children: readonly UiConditionSpec[];
+} | {
+	readonly kind: "or";
+	readonly children: readonly UiConditionSpec[];
+} | {
+	readonly kind: "not";
+	readonly child: UiConditionSpec;
+} | {
+	readonly kind: "rowElement";
+	readonly sourceTarget: MountTarget;
+	readonly list: {
+		readonly by: "name";
+		readonly listPropertyName: string;
+	} | {
+		readonly by: "id";
+		readonly propertyId: string;
+	};
+};
+interface UiItemOptions {
+	readonly name?: string;
+	readonly description?: string;
+}
+type UiItemSpec = ({
+	readonly kind: "label";
+	readonly componentClassName: string;
+	readonly source: UiValueSourceSpec;
+	readonly fallbackText?: string;
+} & UiItemOptions) | ({
+	readonly kind: "value";
+	readonly componentClassName: string;
+	readonly source: UiPropertySourceSpec;
+} & UiItemOptions) | ({
+	readonly kind: "image";
+	readonly componentClassName: string;
+	readonly source: UiValueSourceSpec;
+	readonly imageMode: UiImageMode;
+	readonly fallback?: string;
+} & UiItemOptions) | ({
+	readonly kind: "gauge";
+	readonly componentClassName: string;
+	readonly current: UiValueSourceSpec;
+	readonly max: UiGaugeBoundSourceSpec;
+	readonly min?: UiGaugeBoundSourceSpec;
+	readonly clamp?: boolean;
+} & UiItemOptions) | ({
+	readonly kind: "buttonAction";
+	readonly componentClassName: string;
+	readonly methodName: string;
+	readonly arguments?: Readonly<Record<string, UiValueSourceSpec>>;
+} & UiItemOptions) | ({
+	readonly kind: "activeToggle" | "interactable";
+	readonly componentClassName: string;
+	readonly condition: UiConditionSpec;
+} & UiItemOptions) | ({
+	readonly kind: "templateLabel";
+	readonly componentClassName: string;
+	readonly template: string;
+	readonly sources: Readonly<Record<string, UiValueSourceSpec>>;
+	readonly fallbackText?: string;
+} & UiItemOptions);
+type ForeignRowPropertyName<TTarget> = TTarget extends () => infer TInner ? ForeignRowPropertyName<TInner> : TTarget extends DependencyDomainTypeRef<infer TPublished> ? (keyof TPublished & string) | "id" : TTarget extends LocalDomainTypeDef<string, infer TProps> ? (keyof TProps & string) | "id" : TTarget extends OverlayDomainTypeDef<string, infer TProps, infer TPublished> ? (keyof TProps & string) | (keyof TPublished & string) | "id" : string;
+declare function rowProp<TTarget extends LazyDomainTypeTarget>(target: TTarget, rowId: string, propertyName: ForeignRowPropertyName<TTarget>): UiForeignRowSourceSpec;
+export declare const UiSource: {
+	readonly prop: (propertyName: string) => UiPropertySourceSpec;
+	readonly inheritedProp: (propertyId: string) => Extract<UiPropertySourceSpec, {
+		readonly kind: "inheritedProperty";
+	}>;
+	readonly lit: (value: UiLiteralValue) => UiValueSourceSpec;
+	readonly rowProp: typeof rowProp;
+	readonly bandLower: (sourceType: LazyDomainTypeTarget, tablePropertyName: string, position: UiPropertySourceSpec) => UiTableBandSourceSpec;
+	readonly bandUpper: (sourceType: LazyDomainTypeTarget, tablePropertyName: string, position: UiPropertySourceSpec) => UiTableBandSourceSpec;
+	readonly bandLowerById: (sourceDomainTypeId: string, tablePropertyId: string, position: UiPropertySourceSpec) => UiTableBandSourceSpec;
+	readonly bandUpperById: (sourceDomainTypeId: string, tablePropertyId: string, position: UiPropertySourceSpec) => UiTableBandSourceSpec;
+};
+export declare const UiCond: {
+	readonly truthy: (source: UiConditionOperandSpec) => UiConditionSpec;
+	readonly eq: (lhs: UiConditionOperandSpec, rhs: UiConditionOperandSpec) => UiConditionSpec;
+	readonly neq: (lhs: UiConditionOperandSpec, rhs: UiConditionOperandSpec) => UiConditionSpec;
+	readonly gt: (lhs: UiConditionOperandSpec, rhs: UiConditionOperandSpec) => UiConditionSpec;
+	readonly gte: (lhs: UiConditionOperandSpec, rhs: UiConditionOperandSpec) => UiConditionSpec;
+	readonly lt: (lhs: UiConditionOperandSpec, rhs: UiConditionOperandSpec) => UiConditionSpec;
+	readonly lte: (lhs: UiConditionOperandSpec, rhs: UiConditionOperandSpec) => UiConditionSpec;
+	readonly and: (...children: readonly UiConditionSpec[]) => UiConditionSpec;
+	readonly or: (...children: readonly UiConditionSpec[]) => UiConditionSpec;
+	readonly not: (child: UiConditionSpec) => UiConditionSpec;
+	readonly rowElement: (sourceTarget: MountTarget, list: string | Extract<UiPropertySourceSpec, {
+		readonly kind: "inheritedProperty";
+	}>) => UiConditionSpec;
+};
+export declare const UiItem: {
+	readonly label: (componentClassName: string, source: UiValueSourceSpec, options?: UiItemOptions & {
+		readonly fallbackText?: string;
+	}) => UiItemSpec;
+	readonly value: (componentClassName: string, source: UiPropertySourceSpec, options?: UiItemOptions) => UiItemSpec;
+	readonly image: (componentClassName: string, source: UiValueSourceSpec, imageMode: UiImageMode, options?: UiItemOptions & {
+		readonly fallback?: string;
+	}) => UiItemSpec;
+	readonly gauge: (componentClassName: string, current: UiValueSourceSpec, max: UiGaugeBoundSourceSpec, options?: UiItemOptions & {
+		readonly clamp?: boolean;
+		readonly min?: UiGaugeBoundSourceSpec;
+	}) => UiItemSpec;
+	readonly buttonAction: (componentClassName: string, methodName: string, args?: Readonly<Record<string, UiValueSourceSpec>>, options?: UiItemOptions) => UiItemSpec;
+	readonly activeToggle: (componentClassName: string, condition: UiConditionSpec, options?: UiItemOptions) => UiItemSpec;
+	readonly interactable: (componentClassName: string, condition: UiConditionSpec, options?: UiItemOptions) => UiItemSpec;
+	readonly templateLabel: (componentClassName: string, template: string, sources: Readonly<Record<string, UiValueSourceSpec>>, options?: UiItemOptions & {
+		readonly fallbackText?: string;
+	}) => UiItemSpec;
 };
 interface AccountNamespaceSchema {
 	readonly name: string;
@@ -6105,174 +5669,429 @@ interface ModelRef<S extends Gs2ServiceName = Gs2ServiceName, M extends ModelNam
 	readonly service: S;
 	readonly modelName: M;
 }
-type UntypedBindingRecord = {
-	readonly [parameterName: string]: BindingDirective | UntypedBindingRecord;
+declare const BINDING_HINT_KINDS: {
+	readonly kinds: readonly ("none" | "masterData" | "userData" | "assetDelivery")[];
+	has(value: unknown): value is "none" | "masterData" | "userData" | "assetDelivery";
 };
-declare class MasterDataResourceBuilder<TSchema = Record<string, unknown>> {
-	private _model?;
-	private _mountPath?;
-	private readonly _bindings;
-	private _actionProgram;
-	private readonly _actionPropertyBindings;
-	private readonly _bindingErrors;
-	private readonly _grnFieldMounts;
-	private readonly _children;
-	private _resolvedRef?;
-	private _rowSelection?;
-	private _resourceLink?;
-	model<S extends Gs2ServiceName, M extends ModelNameOf<S>>(ref: ModelRef<S, M>): MasterDataResourceBuilder<ModelSchemaOf<S, M>>;
-	mountLocal(typeName: string): this;
-	mountLocal(reference: InlineElementReference): this;
-	mountLocal(definition: DomainTypeDefinition): this;
-	mountLocal(dependencyType: DependencyDomainTypeRef): this;
-	/** Require the dependency declaration id because a single-package build cannot derive it from the name. */
-	mountDependency(firstHopPackageId: string, domainTypeName: string, typeId: string): this;
-	/** Resolve fan-out names against the child declaration at package compilation so authored forward references remain possible. */
-	elementSourceFkFanout(childType: DomainTypeDefinition | string, fkPropertyName: string): this;
-	/** Include every row of the mounted type under each ancestor. */
-	rowScopeAllRows(): this;
-	/** Select a specific ref on its owning domain type to scope rows to an ancestor. */
-	rowScopeMatched(input: {
-		readonly ancestor: MasterDataResourceReference;
-		readonly direction: "childRefToAncestor" | "ancestorRefToChild";
-		readonly refType: DomainTypeDefinition | DependencyDomainTypeRef | string;
-		readonly propertyName: string;
-	}): this;
-	resourceLink(ref: MasterDataResourceReference | UserDataResourceReference): this;
-	/** Require a published target id; this build can check dependency membership but cannot check target existence without the closure. */
-	externalResourceLink(sourcePackageId: string, resourceKind: "masterData" | "userData", resourceId: string): this;
-	grnFieldMount(parameterName: string, mountedResource: string | MasterDataResourceReference, keyMappings: readonly {
+type BindingHintKind = (typeof BINDING_HINT_KINDS.kinds)[number];
+declare const PRIMITIVE_TYPES: {
+	readonly kinds: readonly ("string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp")[];
+	has(value: unknown): value is "string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp";
+};
+type PrimitiveTypeKind = (typeof PRIMITIVE_TYPES.kinds)[number];
+declare const COMPARISON_OPS: {
+	readonly kinds: readonly ("eq" | "neq" | "gt" | "gte" | "lt" | "lte")[];
+	has(value: unknown): value is "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+};
+type ComparisonOp = (typeof COMPARISON_OPS.kinds)[number];
+type EqualityComparisonOp = Extract<ComparisonOp, "eq" | "neq">;
+type OrderingComparisonOp = Exclude<ComparisonOp, EqualityComparisonOp>;
+interface AndCondition<TCondition> {
+	readonly kind: "and";
+	readonly children: readonly TCondition[];
+}
+interface OrCondition<TCondition> {
+	readonly kind: "or";
+	readonly children: readonly TCondition[];
+}
+interface NotCondition<TCondition> {
+	readonly kind: "not";
+	readonly child: TCondition;
+}
+type ConditionPropertyName = string;
+type RequirementCondition = {
+	readonly kind: EqualityComparisonOp;
+	readonly propertyName: ConditionPropertyName;
+	readonly value: string | number | boolean;
+} | {
+	readonly kind: OrderingComparisonOp;
+	readonly propertyName: ConditionPropertyName;
+	readonly value: number;
+} | {
+	readonly kind: "isSet" | "isNotSet";
+	readonly propertyName: ConditionPropertyName;
+} | AndCondition<RequirementCondition> | OrCondition<RequirementCondition> | NotCondition<RequirementCondition>;
+/** An instance value of `PT.localizedString`: non-empty text per locale, such as `{ ja: "森の巡回", en: "Forest Patrol" }`. */
+export type LocalizedStringValue = {
+	readonly [locale: string]: string;
+};
+type PrimitivePropertyTypeNode = {
+	readonly kind: "primitive";
+	readonly primitiveType: PrimitiveTypeKind;
+};
+type LocalizedStringPropertyTypeNode = {
+	readonly kind: "localizedString";
+};
+type EnumPropertyTypeNode = {
+	readonly kind: "enum";
+	readonly values: readonly string[];
+};
+type RefPropertyTypeNode = {
+	readonly kind: "ref";
+	readonly target: LazyDomainTypeTarget;
+};
+type InlinePropertyTypeNode = {
+	readonly kind: "inline";
+	readonly target: LazyDomainTypeTarget;
+};
+type InlineElementTypeNode = {
+	readonly kind: "inlineElement";
+	readonly schema: InlineElementDef;
+};
+type VerifyActionPropertyTypeNode = {
+	readonly kind: "verifyAction";
+};
+type ConsumeActionPropertyTypeNode = {
+	readonly kind: "consumeAction";
+};
+type AcquireActionPropertyTypeNode = {
+	readonly kind: "acquireAction";
+};
+type PropertyElementTypeNode = PrimitivePropertyTypeNode | EnumPropertyTypeNode | RefPropertyTypeNode | InlinePropertyTypeNode | VerifyActionPropertyTypeNode | ConsumeActionPropertyTypeNode | AcquireActionPropertyTypeNode;
+type ListPropertyTypeNode<TElement extends PropertyElementTypeNode | InlineElementTypeNode = PropertyElementTypeNode | InlineElementTypeNode> = {
+	readonly kind: "list";
+	readonly elementType: TElement;
+};
+type PropertyTypeNode = PropertyElementTypeNode | LocalizedStringPropertyTypeNode | ListPropertyTypeNode;
+type PropertyValueOf<T> = T extends PropertySpec<infer TValue, boolean, PropertyTypeNode> ? TValue : FileDomainPropertyValueDto;
+type IsRequiredProperty<T> = T extends PropertySpec<FileDomainPropertyValueDto, true, PropertyTypeNode, true> ? false : T extends PropertySpec<FileDomainPropertyValueDto, true, PropertyTypeNode> ? true : false;
+interface PropertySpec<TValue extends FileDomainPropertyValueDto = FileDomainPropertyValueDto, TRequired extends boolean = boolean, TNode extends PropertyTypeNode = PropertyTypeNode, TUserData extends boolean = boolean> {
+	readonly __brand: "PropertySpec";
+	readonly __value?: TValue;
+	readonly __required?: TRequired;
+	readonly __userData?: TUserData;
+	readonly type: TNode;
+	readonly requirement: FileRequirementDto;
+	readonly bindingHint?: BindingHintKind;
+	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
+	localizedDisplayOf(display: LocalizedDisplaySnapshotDto): PropertySpec<TValue, TRequired, TNode, TUserData>;
+	display(display: LocalizedDisplaySnapshotDto): PropertySpec<TValue, TRequired, TNode, TUserData>;
+	required(): PropertySpec<TValue, true, TNode, TUserData>;
+	requiredWhen(condition: RequirementCondition, requiredWhenMet?: boolean): PropertySpec<TValue, false, TNode, TUserData>;
+	optionalWhen(condition: RequirementCondition): PropertySpec<TValue, false, TNode, TUserData>;
+	masterData(): PropertySpec<TValue, TRequired, TNode, false>;
+	userData(): PropertySpec<TValue, TRequired, TNode, true>;
+	assetDelivery(): PropertySpec<TValue, TRequired, TNode, false>;
+}
+type InlineElementSpec = InlineElementTypeNode;
+export declare const PT: {
+	readonly string: () => PropertySpec<string, false, PrimitivePropertyTypeNode, false>;
+	readonly int32: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly int64: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly float32: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly float64: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly bool: () => PropertySpec<boolean, false, PrimitivePropertyTypeNode, false>;
+	readonly timestamp: () => PropertySpec<string, false, PrimitivePropertyTypeNode, false>;
+	/** Text per locale, delivered to the client as an asset: only `.assetDelivery()` is accepted. */
+	readonly localizedString: () => PropertySpec<LocalizedStringValue, false, LocalizedStringPropertyTypeNode, false>;
+	readonly enum: <T extends string>(...values: readonly T[]) => PropertySpec<T, false, EnumPropertyTypeNode, false>;
+	readonly ref: (target: LazyDomainTypeTarget) => PropertySpec<string, false, RefPropertyTypeNode, false>;
+	readonly inline: (target: LazyDomainTypeTarget) => PropertySpec<FileDomainPropertyValueDto, false, InlinePropertyTypeNode, false>;
+	readonly inlineElement: (schema: InlineElementDef) => InlineElementSpec;
+	readonly listOf: <TElement extends PropertySpec<FileDomainPropertyValueDto, boolean, PropertyElementTypeNode> | InlineElementSpec>(element: TElement) => PropertySpec<FileDomainPropertyValueDto, false, ListPropertyTypeNode, false>;
+	readonly verifyAction: () => PropertySpec<FileDomainPropertyValueDto, false, VerifyActionPropertyTypeNode, false>;
+	readonly consumeAction: () => PropertySpec<FileDomainPropertyValueDto, false, ConsumeActionPropertyTypeNode, false>;
+	readonly acquireAction: () => PropertySpec<FileDomainPropertyValueDto, false, AcquireActionPropertyTypeNode, false>;
+};
+type ConditionScalar = string | number | boolean;
+/** The signatures refuse the shapes the stored-condition parser rejects: a non-scalar comparison value and an empty junction. */
+export declare const Cond: {
+	readonly eq: (propertyName: string, value: ConditionScalar) => RequirementCondition;
+	readonly neq: (propertyName: string, value: ConditionScalar) => RequirementCondition;
+	readonly isSet: (propertyName: string) => RequirementCondition;
+	readonly isNotSet: (propertyName: string) => RequirementCondition;
+	readonly not: (condition: RequirementCondition) => RequirementCondition;
+	readonly and: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition;
+	readonly or: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition;
+	readonly gt: (propertyName: string, value: number) => RequirementCondition;
+	readonly lt: (propertyName: string, value: number) => RequirementCondition;
+	readonly gte: (propertyName: string, value: number) => RequirementCondition;
+	readonly lte: (propertyName: string, value: number) => RequirementCondition;
+};
+interface CodeTemplateSnapshotDto {
+	readonly outputFileName: string;
+	readonly templateSource: string;
+}
+type ResourceKind = "masterData" | "userData";
+type SortDirection = "asc" | "desc";
+export type InstanceValues = Readonly<Record<string, FileDomainPropertyValueDto | undefined>>;
+type RequiredPropKeys<TProps extends Record<string, PropertySpec>> = {
+	[K in keyof TProps & string]: IsRequiredProperty<TProps[K]> extends true ? K : never;
+}[keyof TProps & string];
+type OptionalPropKeys<TProps extends Record<string, PropertySpec>> = {
+	[K in keyof TProps & string]: IsRequiredProperty<TProps[K]> extends true ? never : K;
+}[keyof TProps & string];
+type InferredProps<TProps extends Record<string, PropertySpec>> = {
+	readonly [K in RequiredPropKeys<TProps>]: PropertyValueOf<TProps[K]>;
+} & {
+	readonly [K in OptionalPropKeys<TProps>]?: PropertyValueOf<TProps[K]>;
+};
+type PublishedProps<TOptions> = TOptions extends {
+	readonly publishedProperties?: infer P;
+} ? {
+	readonly [K in keyof P & string]?: FileDomainPropertyValueDto;
+} : Record<string, never>;
+type DomainTypeListValueSourceDef = {
+	readonly kind: "domainProperty";
+	readonly propertyName: string;
+} | {
+	readonly kind: "static";
+	readonly value: JsonValue;
+};
+type DomainTypeListEntryOverrideDef = {
+	readonly kind: "value";
+	readonly source: DomainTypeListValueSourceDef;
+} | {
+	readonly kind: "fields";
+	readonly fields: readonly {
+		readonly name: string;
+		readonly source: DomainTypeListValueSourceDef;
+	}[];
+};
+type DomainTypeParameterOverrideSourceDef = DomainTypeListValueSourceDef | {
+	readonly kind: "actionLiteral";
+	readonly value: JsonValue;
+} | {
+	readonly kind: "listEntries";
+	readonly entries: readonly DomainTypeListEntryOverrideDef[];
+};
+interface DelegatedActionParameterOverrideDef {
+	readonly parameterName: string;
+	readonly source: DomainTypeParameterOverrideSourceDef;
+}
+export interface DelegatedActionDef {
+	readonly targetActionKey: string;
+	readonly targetResource: AnyResourceRef;
+	readonly parameterOverrides?: readonly DelegatedActionParameterOverrideDef[];
+}
+type DomainTypeTransformArgumentSourceDef = {
+	readonly kind: "domainProperty";
+	readonly propertyName: string;
+} | {
+	readonly kind: "static";
+	readonly value: JsonValue;
+} | {
+	readonly kind: "actionLiteral";
+	readonly value: JsonValue;
+} | {
+	readonly kind: "placeholder";
+	readonly value: string;
+} | {
+	readonly kind: "actionTransformRef";
+	readonly invocation: {
+		readonly transform?: LazyActionTransformRef;
+		readonly transformPackageId?: string;
+		readonly transformId?: string;
+		readonly arguments: readonly DomainTypeTransformArgumentDef[];
+	};
+};
+interface DomainTypeTransformArgumentDef {
+	readonly parameterName: string;
+	readonly source: DomainTypeTransformArgumentSourceDef;
+}
+interface OverlayActionPropertyTransformDef {
+	readonly targetProperty: string;
+	readonly mode?: "replace" | "append";
+	/** Local transform handle (or thunk) or dependency transform coordinates. */
+	readonly transform?: LazyActionTransformRef;
+	readonly transformPackageId?: string;
+	readonly transformId?: string;
+	readonly arguments: readonly DomainTypeTransformArgumentDef[];
+}
+interface SortSpec<TKey extends string = string> {
+	readonly key: TKey | "id" | null;
+	readonly direction?: SortDirection;
+}
+interface InlineElementSpec$1<TProps extends Record<string, PropertySpec> = Record<string, PropertySpec>> {
+	readonly properties: TProps;
+	readonly elementKey?: readonly (keyof TProps & string)[];
+	readonly sort?: SortSpec<keyof TProps & string>;
+	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
+	readonly localizedProperties?: Partial<Record<(keyof TProps & string) | "id", LocalizedDisplaySnapshotDto>>;
+	readonly delegatedActions?: Readonly<Record<string, DelegatedActionDef>>;
+}
+export interface InlineElementDef<TName extends string = string, TProps extends InstanceValues = InstanceValues> {
+	readonly kind: "inlineElementDef";
+	readonly token: symbol;
+	readonly name: TName;
+	readonly spec: InlineElementSpec$1;
+	readonly __props?: TProps;
+}
+export declare function defineInlineElement<TName extends string, TProps extends Record<string, PropertySpec>>(name: TName, spec: InlineElementSpec$1<TProps>): InlineElementDef<TName, InferredProps<TProps>>;
+interface LocalDomainTypeSpec<TProps extends Record<string, PropertySpec> = Record<string, PropertySpec>> {
+	readonly properties?: TProps;
+	readonly singleEntry?: boolean;
+	readonly compositeKey?: readonly (keyof TProps & string)[];
+	readonly sort?: SortSpec<keyof TProps & string>;
+	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
+	readonly localizedProperties?: Partial<Record<(keyof TProps & string) | "id", LocalizedDisplaySnapshotDto>>;
+	readonly delegatedActions?: Readonly<Record<string, DelegatedActionDef>>;
+}
+export interface LocalDomainTypeDef<TName extends string = string, TProps extends InstanceValues = InstanceValues> {
+	readonly kind: "localDomainType";
+	readonly name: TName;
+	readonly spec: LocalDomainTypeSpec;
+	readonly __props?: TProps;
+}
+export declare function defineDomainType<TName extends string, TProps extends Record<string, PropertySpec> = Record<string, never>>(name: TName, spec?: LocalDomainTypeSpec<TProps>): LocalDomainTypeDef<TName, InferredProps<TProps>>;
+type OverlayCompositeKeySpec = {
+	readonly kind: "inherit";
+} | {
+	readonly kind: "suppress";
+} | {
+	readonly kind: "override";
+	readonly members: readonly string[];
+};
+interface OverlayDomainTypeSpec<TProps extends Record<string, PropertySpec> = Record<string, PropertySpec>> {
+	readonly properties?: TProps;
+	readonly sort?: SortSpec<string>;
+	readonly compositeKey?: OverlayCompositeKeySpec;
+	readonly renamedInheritedProperties?: Readonly<Record<string, string>>;
+	readonly actionPropertyTransforms?: readonly OverlayActionPropertyTransformDef[];
+	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
+	readonly localizedProperties?: Readonly<Record<string, LocalizedDisplaySnapshotDto>>;
+	readonly delegatedActions?: Readonly<Record<string, DelegatedActionDef>>;
+}
+export interface OverlayDomainTypeDef<TName extends string = string, TProps extends InstanceValues = InstanceValues, TPublished extends InstanceValues = InstanceValues> {
+	readonly kind: "overlayDomainType";
+	readonly name: TName;
+	readonly source: DependencyOverlayOptions;
+	readonly spec: OverlayDomainTypeSpec;
+	readonly __props?: TProps;
+	readonly __published?: TPublished;
+}
+export declare function defineOverlayDomainType<TName extends string, TOptions extends DependencyOverlayOptions, TProps extends Record<string, PropertySpec> = Record<string, never>>(name: TName, source: TOptions, spec?: OverlayDomainTypeSpec<TProps>): OverlayDomainTypeDef<TName, InferredProps<TProps>, PublishedProps<TOptions>>;
+export type DomainTypeDef<TName extends string = string, TProps extends InstanceValues = InstanceValues, TPublished extends InstanceValues = InstanceValues> = LocalDomainTypeDef<TName, TProps> | OverlayDomainTypeDef<TName, TProps, TPublished>;
+type DomainTypeTarget = DomainTypeDef | DependencyDomainTypeRef;
+type LazyDomainTypeTarget = DomainTypeTarget | (() => DomainTypeTarget);
+export interface InlineElementReference {
+	readonly kind: "inlineElementReference";
+	readonly host: LazyDomainTypeTarget;
+	readonly propertyPath: readonly [
+		string,
+		...string[]
+	];
+}
+export declare function inlineElementOf(host: LazyDomainTypeTarget, firstProperty: string, ...nestedProperties: readonly string[]): InlineElementReference;
+type MountTarget = LazyDomainTypeTarget | InlineElementReference;
+type MasterResourceRef = MasterDataResourceDef | (() => MasterDataResourceDef);
+type UserResourceRef = UserDataResourceDef | (() => UserDataResourceDef);
+type AnyResourceRef = MasterResourceRef | UserResourceRef;
+type ExternalResourceRefSpec = {
+	readonly kind: "external";
+	readonly sourcePackageId: string;
+	readonly resourceKind: ResourceKind;
+	readonly resourceId: string;
+};
+type MasterDataRowScopeSpec = {
+	readonly kind: "allRows";
+} | {
+	readonly kind: "matched";
+	readonly ancestor: MasterResourceRef;
+	readonly direction: "childRefToAncestor" | "ancestorRefToChild";
+	readonly refType: LazyDomainTypeTarget;
+	readonly property: string;
+} | {
+	readonly kind: "fkFanout";
+	readonly childType: LazyDomainTypeTarget;
+	readonly fkProperty: string;
+};
+interface GrnFieldMountSpec {
+	readonly parameterName: string;
+	readonly mountedResource: MasterResourceRef | string;
+	readonly keyMappings: readonly {
 		readonly grnKeyName: string;
 		readonly sourceKeyName: string;
-	}[]): this;
-	grnKeyBinding(parameterName: string, keyName: string, directive: BindingDirective): this;
-	/** Typed catalog bindings and untyped paths must share flattening and error collection. */
-	private _applyBindingRecord;
-	bindings(record: BindingRecord<TSchema>): this;
-	/** Keep an explicit untyped path for overlay names and JSON-blob fields that the catalog schema cannot express. */
-	domainPropertyBindings(record: UntypedBindingRecord): this;
-	actionProgram(program: DslActionProgramInput | undefined): this;
-	actionPropertyProgram(propertyName: string, program: DslActionProgramInput | undefined): this;
-	ref(): MasterDataResourceRef;
-	addChild(definition: MasterDataResourceDefinition): this;
-	addChild(define: (builder: MasterDataResourceBuilder) => void): this;
-	addArrayChild(arrayProperty: ArrayPropertyNameOf<TSchema> | (string & {}), definition: MasterDataResourceDefinition): this;
-	addArrayChild(arrayProperty: ArrayPropertyNameOf<TSchema> | (string & {}), define: (builder: MasterDataResourceBuilder) => void): this;
-	/** Keep resourceRef as a draft because master-to-user links cannot resolve until both resource build passes finish. */
-	private buildResourceLinksDraft;
+	}[];
 }
-export declare function defineMasterDataResource(define: (builder: MasterDataResourceBuilder<Record<string, unknown>>) => void): MasterDataResourceDefinition;
-interface UiItemOptions {
-	readonly name?: string;
-	readonly description?: string;
+interface GrnKeyBindingSpec {
+	readonly parameterName: string;
+	readonly keyName: string;
+	readonly directive: BindingDirective;
 }
-type InheritedPropertySource = Extract<DslUiPropertySourceDto, {
-	kind: "inheritedProperty";
-}>;
-declare function rowElementCondition<TSourceProps extends Record<string, FileDomainPropertyValueDto>>(parentType: DomainTypeDefinition<string, TSourceProps>, list: Extract<keyof TSourceProps, string> | InheritedPropertySource): DslUiConditionDto;
-declare function rowElementCondition<TPublished extends Readonly<Record<string, string>>>(parentType: DependencyDomainTypeRef<TPublished>, list: Extract<keyof TPublished, string> | InheritedPropertySource): DslUiConditionDto;
-declare function rowElementCondition(parentType: InlineElementReference, list: string | InheritedPropertySource): DslUiConditionDto;
-/** Keep UI conditions separate from requirement conditions: these compare value sources rather than testing one property. */
-export declare const UiCond: {
-	readonly truthy: (source: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly eq: (lhs: DslUiValueSourceDto, rhs: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly neq: (lhs: DslUiValueSourceDto, rhs: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly gt: (lhs: DslUiValueSourceDto, rhs: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly gte: (lhs: DslUiValueSourceDto, rhs: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly lt: (lhs: DslUiValueSourceDto, rhs: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly lte: (lhs: DslUiValueSourceDto, rhs: DslUiValueSourceDto) => DslUiConditionDto;
-	readonly and: (...children: readonly DslUiConditionDto[]) => DslUiConditionDto;
-	readonly or: (...children: readonly DslUiConditionDto[]) => DslUiConditionDto;
-	readonly not: (child: DslUiConditionDto) => DslUiConditionDto;
-	/** Resolve the boolean list on the parent row's handler. Dependency refs require a hosted overlay; unavailable inherited names need a published property id and resolved-view validation. */
-	readonly rowElement: typeof rowElementCondition;
-};
-declare class UiComponentBuilder<TProps extends Record<string, FileDomainPropertyValueDto> = Record<string, FileDomainPropertyValueDto>> {
-	private readonly _items;
-	prop(name: Extract<keyof TProps, string> | "id"): DslUiPropertySourceDto;
-	/** Accept a published PropertyId when this package has no usable name for an inherited member. */
-	inheritedProp(propertyId: string): InheritedPropertySource;
-	lit(value: DslUiLiteralValue): DslUiValueSourceDto;
-	/** Address the table through its owning type because prop is scoped to the component target. position is a value on that table's scale, not an element index. */
-	bandLower<TSourceProps extends Record<string, FileDomainPropertyValueDto>>(sourceDomainType: DomainTypeDefinition<string, TSourceProps>, tablePropertyName: Extract<keyof TSourceProps, string>, position: DslUiPropertySourceDto): DslUiTableBandSourceDto;
-	bandUpper<TSourceProps extends Record<string, FileDomainPropertyValueDto>>(sourceDomainType: DomainTypeDefinition<string, TSourceProps>, tablePropertyName: Extract<keyof TSourceProps, string>, position: DslUiPropertySourceDto): DslUiTableBandSourceDto;
-	/** Use published dependency ids because this build cannot load the closure; single-entry and numeric-list checks then require the resolved view. */
-	bandLowerById(sourceDomainTypeId: string, tablePropertyId: string, position: DslUiPropertySourceDto): DslUiTableBandSourceDto;
-	bandUpperById(sourceDomainTypeId: string, tablePropertyId: string, position: DslUiPropertySourceDto): DslUiTableBandSourceDto;
-	label(componentClassName: string, source: DslUiValueSourceDto, options?: UiItemOptions & {
-		readonly fallbackText?: string;
-	}): this;
-	value(componentClassName: string, source: DslUiPropertySourceDto, options?: UiItemOptions): this;
-	image(componentClassName: string, source: DslUiValueSourceDto, imageMode: DslUiImageMode, options?: UiItemOptions & {
-		readonly fallback?: string;
-	}): this;
-	/** Keep min optional to preserve zero-based gauges while permitting the same table-band sources as max. */
-	gauge(componentClassName: string, current: DslUiValueSourceDto, max: DslUiGaugeBoundSourceDto, options?: UiItemOptions & {
-		readonly clamp?: boolean;
-		readonly min?: DslUiGaugeBoundSourceDto;
-	}): this;
-	/** Key arguments by parameter name to prevent duplicate slots before lowering the method name to a stable action key. */
-	buttonAction(componentClassName: string, methodName: string, args?: Readonly<Record<string, DslUiValueSourceDto>>, options?: UiItemOptions): this;
-	activeToggle(componentClassName: string, condition: DslUiConditionDto, options?: UiItemOptions): this;
-	interactable(componentClassName: string, condition: DslUiConditionDto, options?: UiItemOptions): this;
-	private pushToggleItem;
-	/** Key the source record by placeholder so each placeholder has at most one source slot. */
-	templateLabel(componentClassName: string, template: string, sources: Readonly<Record<string, DslUiValueSourceDto>>, options?: UiItemOptions & {
-		readonly fallbackText?: string;
-	}): this;
+interface MasterDataResourceSpec<S extends Gs2ServiceName = Gs2ServiceName, M extends ModelNameOf<S> = ModelNameOf<S>> {
+	readonly model: ModelRef<S, M>;
+	readonly mount?: MountTarget;
+	readonly bindings?: BindingRecord<ModelSchemaOf<S, M>>;
+	readonly domainPropertyBindings?: UntypedBindingRecord;
+	readonly actionProgram?: ActionProgramInput;
+	readonly actionPropertyPrograms?: Readonly<Record<string, ActionProgramInput>>;
+	readonly rowScope?: MasterDataRowScopeSpec;
+	readonly resourceLink?: AnyResourceRef | ExternalResourceRefSpec;
+	readonly grnFieldMounts?: readonly GrnFieldMountSpec[];
+	readonly grnKeyBindings?: readonly GrnKeyBindingSpec[];
+	readonly children?: readonly MasterDataResourceDef[];
+	readonly arrayChildren?: Partial<Record<ArrayPropertyNameOf<ModelSchemaOf<S, M>> | (string & {}), readonly MasterDataResourceDef[]>>;
 }
-declare class UserDataResourceBuilder<TSchema = Record<string, unknown>> {
-	private _model?;
-	/** Present once the link is declared; its ref is resolved at build, where an unresolvable ref is reported. */
-	private _linkedMaster?;
-	private _mountPath?;
-	private readonly _bindings;
-	private readonly _bindingErrors;
-	private readonly _children;
-	private _resolvedRef?;
-	private _existencePropertyId?;
-	private readonly _grnRefBindings;
-	private readonly _decoderBindings;
-	private readonly _projectionBindings;
-	model<S extends Gs2ServiceName, M extends ModelNameOf<S>>(ref: ModelRef<S, M>): UserDataResourceBuilder<ModelSchemaOf<S, M>>;
-	/** Capture refs before the graph is built; location and mount-dependent ids become available during resource construction. */
-	ref(): UserDataResourceRef;
-	/** Parent-key lookup starts at the linked master's ancestors, so a required parent-key binding on the linked resource itself is unavailable. The link supplies loader identity independently of the target DomainType mount. */
-	linkedMasterResourceId(ref: MasterDataResourceReference): this;
-	mountType(mountPath: DslDomainTypeMountPathDto): this;
-	mountLocal(typeName: string): this;
-	mountLocal(definition: DomainTypeDefinition): this;
-	mountLocal(dependencyType: DependencyDomainTypeRef): this;
-	/** Require the dependency declaration id because a single-package build cannot derive it from the name. */
-	mountDependency(firstHopPackageId: string, domainTypeName: string, typeId: string): this;
-	existenceProperty(propertyId: string): this;
-	/** Retain child property names until compilation can resolve them against the child mount, independently of the resource's own mount. */
-	arrayMembershipMapping(parameterName: string, child: DomainTypeDefinition | string | DslDomainTypeMountPathDto, targetKeyPropertyName: string, targetPropertyName: string): this;
-	grnRefBinding(parameterName: string, grnFormat: string, keyMappings: readonly {
+interface MasterDataResourceDefSpec {
+	readonly model: {
+		readonly service: string;
+		readonly modelName: string;
+	};
+	readonly mount?: MountTarget;
+	readonly bindings?: Record<string, unknown>;
+	readonly domainPropertyBindings?: UntypedBindingRecord;
+	readonly actionProgram?: ActionProgramInput;
+	readonly actionPropertyPrograms?: Readonly<Record<string, ActionProgramInput>>;
+	readonly rowScope?: MasterDataRowScopeSpec;
+	readonly resourceLink?: AnyResourceRef | ExternalResourceRefSpec;
+	readonly grnFieldMounts?: readonly GrnFieldMountSpec[];
+	readonly grnKeyBindings?: readonly GrnKeyBindingSpec[];
+	readonly children?: readonly MasterDataResourceDef[];
+	readonly arrayChildren?: Readonly<Record<string, readonly MasterDataResourceDef[] | undefined>>;
+}
+export interface MasterDataResourceDef {
+	readonly kind: "masterDataResourceDef";
+	readonly spec: MasterDataResourceDefSpec;
+}
+export declare function defineMasterDataResource<S extends Gs2ServiceName, M extends ModelNameOf<S>>(spec: MasterDataResourceSpec<S, M>): MasterDataResourceDef;
+interface GrnRefBindingSpec {
+	readonly parameterName: string;
+	readonly grnFormat: string;
+	readonly keyMappings: readonly {
 		readonly extractedKeyName: string;
-		readonly target: DomainTypeDefinition | string | DslDomainTypeMountPathDto;
-		readonly targetKeyPropertyName: string;
-	}[]): this;
-	/** Keep GS2 field names verbatim, but resolve destination names separately on the mount type and its inline element type. */
-	modelArrayDecodeBinding(parameterName: string, target: DomainTypeDefinition | string | DslDomainTypeMountPathDto, targetListPropertyName: string, fieldMappings: readonly {
+		readonly target: LazyDomainTypeTarget;
+		readonly targetKeyProperty: string;
+	}[];
+}
+interface ModelArrayDecodeBindingSpec {
+	readonly parameterName: string;
+	readonly target: LazyDomainTypeTarget;
+	readonly targetListProperty: string;
+	readonly fieldMappings: readonly {
 		readonly fieldName: string;
-		readonly targetPropertyName: string;
-	}[], idSourceField?: string): this;
-	/** Keep GS2 selector fields verbatim; only destination property names resolve against the target mount. */
-	elementProjectionBinding(parameterName: string, target: DomainTypeDefinition | string | DslDomainTypeMountPathDto, entries: readonly {
+		readonly targetProperty: string;
+	}[];
+	readonly idSourceField?: string;
+}
+interface ArrayMembershipMappingSpec {
+	readonly parameterName: string;
+	readonly child: LazyDomainTypeTarget;
+	readonly targetKeyProperty: string;
+	readonly targetProperty: string;
+}
+interface ElementProjectionBindingSpec {
+	readonly parameterName: string;
+	readonly target: LazyDomainTypeTarget;
+	readonly entries: readonly {
 		readonly selectors: readonly {
 			readonly fieldName: string;
 			readonly value: JsonValue;
 		}[];
 		readonly projections: readonly {
 			readonly fieldName: string;
-			readonly targetPropertyName: string;
+			readonly targetProperty: string;
 		}[];
-	}[]): this;
-	/** Resolve argument properties on the inline element type, independently of the mount's list property. */
-	transformDecodeBinding(parameterName: string, target: DomainTypeDefinition | string | DslDomainTypeMountPathDto, targetListPropertyName: string, entries: readonly {
-		readonly transformPackageId: string;
-		readonly transformId: string;
+	}[];
+}
+interface TransformDecodeBindingSpec {
+	readonly parameterName: string;
+	readonly target: LazyDomainTypeTarget;
+	readonly targetListProperty: string;
+	readonly entries: readonly {
+		readonly transform?: LazyActionTransformRef;
+		readonly transformPackageId?: string;
+		readonly transformId?: string;
 		readonly arguments: readonly {
 			readonly parameterName: string;
 			readonly source: {
@@ -6283,14 +6102,147 @@ declare class UserDataResourceBuilder<TSchema = Record<string, unknown>> {
 				readonly value: JsonValue;
 			};
 		}[];
-	}[]): this;
-	/** Project the resolved key without replacing its own binding; resolve the destination name against the target mount. */
-	keyProjectionBinding(parameterName: string, target: DomainTypeDefinition | string | DslDomainTypeMountPathDto, targetPropertyName: string): this;
-	bindings(record: BindingRecord<TSchema>): this;
-	addChild(definition: UserDataResourceDefinition): this;
-	addChild(define: (builder: UserDataResourceBuilder) => void): this;
+	}[];
 }
-export declare function defineUserDataResource(define: (builder: UserDataResourceBuilder<Record<string, unknown>>) => void): UserDataResourceDefinition;
+interface KeyProjectionBindingSpec {
+	readonly parameterName: string;
+	readonly target: LazyDomainTypeTarget;
+	readonly targetProperty: string;
+}
+interface UserDataResourceSpec<S extends Gs2ServiceName = Gs2ServiceName, M extends ModelNameOf<S> = ModelNameOf<S>> {
+	readonly model: ModelRef<S, M>;
+	readonly mount?: MountTarget;
+	readonly linkedMaster?: MasterResourceRef | string;
+	readonly existenceProperty?: string;
+	readonly bindings?: BindingRecord<ModelSchemaOf<S, M>>;
+	readonly domainPropertyBindings?: UntypedBindingRecord;
+	readonly grnRefBindings?: readonly GrnRefBindingSpec[];
+	readonly modelArrayDecodeBindings?: readonly ModelArrayDecodeBindingSpec[];
+	readonly arrayMembershipMappings?: readonly ArrayMembershipMappingSpec[];
+	readonly elementProjectionBindings?: readonly ElementProjectionBindingSpec[];
+	readonly transformDecodeBindings?: readonly TransformDecodeBindingSpec[];
+	readonly keyProjectionBindings?: readonly KeyProjectionBindingSpec[];
+	readonly children?: readonly UserDataResourceDef[];
+}
+interface UserDataResourceDefSpec {
+	readonly model: {
+		readonly service: string;
+		readonly modelName: string;
+	};
+	readonly mount?: MountTarget;
+	readonly linkedMaster?: MasterResourceRef | string;
+	readonly existenceProperty?: string;
+	readonly bindings?: Record<string, unknown>;
+	readonly domainPropertyBindings?: UntypedBindingRecord;
+	readonly grnRefBindings?: readonly GrnRefBindingSpec[];
+	readonly modelArrayDecodeBindings?: readonly ModelArrayDecodeBindingSpec[];
+	readonly arrayMembershipMappings?: readonly ArrayMembershipMappingSpec[];
+	readonly elementProjectionBindings?: readonly ElementProjectionBindingSpec[];
+	readonly transformDecodeBindings?: readonly TransformDecodeBindingSpec[];
+	readonly keyProjectionBindings?: readonly KeyProjectionBindingSpec[];
+	readonly children?: readonly UserDataResourceDef[];
+}
+export interface UserDataResourceDef {
+	readonly kind: "userDataResourceDef";
+	readonly spec: UserDataResourceDefSpec;
+}
+export declare function defineUserDataResource<S extends Gs2ServiceName, M extends ModelNameOf<S>>(spec: UserDataResourceSpec<S, M>): UserDataResourceDef;
+interface ActionTransformConditionSpec {
+	readonly sourceParameter: string;
+	readonly operator: ComparisonOperatorSnapshotDto;
+	readonly value: JsonValue;
+}
+type DelegationArgSpec = {
+	readonly kind: "parameter";
+	readonly sourceParameter: string;
+} | {
+	readonly kind: "static";
+	readonly value: JsonValue;
+};
+interface ActionTransformDirectOutputSpec {
+	readonly kind: "direct";
+	readonly actionName: string;
+	readonly resource?: AnyResourceRef | ExternalResourceRefSpec;
+	readonly conditions?: readonly ActionTransformConditionSpec[];
+	readonly parameterMappings?: Readonly<Record<string, OutputParameterMappingSpec>>;
+}
+type DelegationTargetSpec = ActionTransformDef | (() => ActionTransformDef) | {
+	readonly transformPackageId: string;
+	readonly transformId: string;
+};
+interface ActionTransformDelegationOutputSpec {
+	readonly kind: "delegation";
+	readonly target: DelegationTargetSpec;
+	readonly conditions?: readonly ActionTransformConditionSpec[];
+	readonly arguments?: Readonly<Record<string, DelegationArgSpec>>;
+}
+type ActionTransformOutputSpec = ActionTransformDirectOutputSpec | ActionTransformDelegationOutputSpec;
+interface ActionTransformParameterSpec {
+	readonly type: PropertySpec;
+	readonly description?: string;
+	readonly required?: boolean;
+}
+export interface ActionTransformSpec {
+	readonly category: ActionCategorySnapshotDto;
+	readonly parameters?: Readonly<Record<string, ActionTransformParameterSpec>>;
+	readonly outputs: readonly ActionTransformOutputSpec[];
+}
+export interface ActionTransformDef<TName extends string = string> {
+	readonly kind: "actionTransformDef";
+	readonly name: TName;
+	readonly spec: ActionTransformSpec;
+}
+type LazyActionTransformRef = ActionTransformDef | (() => ActionTransformDef);
+export declare function defineActionTransform<TName extends string>(name: TName, spec: ActionTransformSpec): ActionTransformDef<TName>;
+interface UiComponentSpec {
+	readonly items: readonly UiItemSpec[];
+}
+export interface UiComponentDef {
+	readonly kind: "uiComponentDef";
+	readonly target: MountTarget;
+	readonly spec: UiComponentSpec;
+}
+export declare function defineUiComponent(target: MountTarget, spec: UiComponentSpec): UiComponentDef;
+export interface AuthoredInstanceSpec {
+	readonly kind: "authoredInstance";
+	readonly type: DomainTypeTarget;
+	readonly id: string;
+	readonly values: InstanceValues;
+}
+export declare function instance<TName extends string, TProps extends InstanceValues>(type: LocalDomainTypeDef<TName, TProps>, id: string, values: TProps): AuthoredInstanceSpec;
+export declare function instance<TName extends string, TProps extends InstanceValues, TPublished extends InstanceValues>(type: OverlayDomainTypeDef<TName, TProps, TPublished>, id: string, values: InstanceValues): AuthoredInstanceSpec;
+export declare function instance(type: DependencyDomainTypeRef, id: string, values: InstanceValues): AuthoredInstanceSpec;
+export interface OverlayInstanceSpec {
+	readonly kind: "overlayInstance";
+	readonly type: OverlayDomainTypeDef | DependencyDomainTypeRef;
+	readonly sourceInstanceId: string;
+	readonly overrides?: InstanceValues;
+	readonly suppressed?: boolean;
+}
+export declare function overlayInstance(type: OverlayDomainTypeDef | DependencyDomainTypeRef, sourceInstanceId: string, options?: {
+	readonly overrides?: InstanceValues;
+	readonly suppressed?: boolean;
+}): OverlayInstanceSpec;
+interface PackageDelegatedActionSpec {
+	readonly target: DomainTypeTarget;
+	readonly methodName: string;
+	readonly action: DelegatedActionDef;
+}
+export interface PackageSpec {
+	readonly id: string;
+	readonly version: string;
+	readonly display?: LocalizedDisplaySnapshotDto;
+	readonly dependencies?: Readonly<Record<string, string>>;
+	readonly domainTypes?: readonly DomainTypeDef[];
+	readonly instances?: readonly AuthoredInstanceSpec[];
+	readonly overlayInstances?: readonly OverlayInstanceSpec[];
+	readonly delegatedActions?: readonly PackageDelegatedActionSpec[];
+	readonly masterDataResources?: readonly MasterDataResourceDef[];
+	readonly userDataResources?: readonly UserDataResourceDef[];
+	readonly actionTransforms?: readonly ActionTransformDef[];
+	readonly uiComponents?: readonly UiComponentDef[];
+	readonly codeTemplates?: readonly CodeTemplateSnapshotDto[];
+}
 interface ScriptSettingShape {
 	readonly triggerScriptId?: string;
 	readonly doneTriggerTargetType?: string;
@@ -6311,36 +6263,6 @@ export type ScriptSettingOptions = {
 export declare function scriptGrn(namespaceName: string, scriptName: string): string;
 /** Bind omitted fields explicitly too, so callers get a complete settings block without repeating null bindings. */
 export declare function scriptSetting(options?: ScriptSettingOptions): Required<BindingRecord<ScriptSettingShape>>;
-interface Fields {
-	readonly name: string;
-	readonly display?: LocalizedDisplaySnapshotDto;
-	readonly propertyDisplay?: Readonly<Record<string, LocalizedDisplaySnapshotDto>>;
-	readonly properties: readonly {
-		readonly id: string;
-		readonly def: PropertyDef;
-	}[];
-	readonly elementKey: readonly string[] | null;
-	readonly actions: readonly {
-		readonly methodName: string;
-		readonly def: DelegatedActionDef;
-	}[];
-	readonly sort: {
-		readonly key: string | null;
-		readonly direction: "asc" | "desc";
-	};
-}
-declare class InlineElementSchemaBuilder<TProps extends Record<string, FileDomainPropertyValueDto> = EmptyTypedProps> {
-	private readonly fields;
-	constructor(name: string, fields?: Fields);
-	property<N extends string, V extends FileDomainPropertyValueDto, R extends boolean>(def: NonReservedPropertyDef<N, V, R>): InlineElementSchemaBuilder<NextDomainTypeProps<TProps, N, V, R>>;
-	localizedDisplay(display: LocalizedDisplaySnapshotDto): InlineElementSchemaBuilder<TProps>;
-	localizedProperties(propertyDisplay: LocalizedPropertyDisplayMap<TProps>): InlineElementSchemaBuilder<TProps>;
-	elementKey(first: Extract<keyof TProps, string>, ...rest: readonly Extract<keyof TProps, string>[]): InlineElementSchemaBuilder<TProps>;
-	sortBy(key: Extract<keyof TProps, string> | "id" | null, direction?: "asc" | "desc"): InlineElementSchemaBuilder<TProps>;
-	delegatedAction(methodName: string, def: DelegatedActionDef): InlineElementSchemaBuilder<TProps>;
-	private buildProperties;
-}
-export declare function defineInlineElement<TProps extends Record<string, FileDomainPropertyValueDto>>(name: string, define: (builder: InlineElementSchemaBuilder<EmptyTypedProps>) => InlineElementSchemaBuilder<TProps>): InlineElementSchemaBuilder<TProps>;
 export declare const GS2: {
 	readonly account: {
 		readonly Namespace: {
@@ -9072,69 +8994,23 @@ interface TransactionSettingV2Shape {
  * time by default, so an action can work on what an earlier one in the same transaction wrote.
  */
 export declare function transactionSettingV2(overrides?: BindingRecord<TransactionSettingV2Shape>): Required<BindingRecord<TransactionSettingV2Shape>>;
-/**
- * A resource reference for callbacks that receive one. Declared as an alias so the published declarations do not
- * present the internal class as a value export, which the runtime does not provide.
- */
-type MasterDataResourceRef$1 = MasterDataResourceRef;
 /** Localized label, description, and unit that display entries and property metadata accept. */
 export type LocalizedDisplay = LocalizedDisplaySnapshotDto;
 /**
- * Result of `PackageBuilder.build()`. A package module exports it for GS2 Studio, which validates the package and
- * writes its files; the DSL defines no members on it.
+ * Result of `PackageDefinition.build()`. A package module exports either a `PackageDefinition` or a `BuiltPackage`
+ * for GS2 Studio, which validates the package and writes its files; the DSL defines no members on it.
  */
 export type BuiltPackage = object;
-type PropertyValues = Record<string, FileDomainPropertyValueDto>;
-/**
- * Authoring surface of `definePackage(...)`. Each member returns the builder so calls chain until `build()`.
- * Members are function-typed properties so parameters are compared strictly against the internal builder.
- */
-export interface PackageBuilder {
-	readonly display: (entry: PackageDisplayEntryDraft) => PackageBuilder;
-	readonly displayType: (definition: DomainTypeDefinition | string, entry: PackageDisplayEntryDraft) => PackageBuilder;
-	readonly dependency: (packageId: string, spec: string) => PackageBuilder;
-	readonly domainType: {
-		(name: string, cb: (builder: DomainTypeBuilder) => void): PackageBuilder;
-		(definition: DomainTypeDefinition): PackageBuilder;
-	};
-	readonly overlayTypeSpec: (name: string, options: OverlayTypeSpecOptions) => PackageBuilder;
-	readonly delegatedAction: {
-		<TName extends string>(definition: DomainTypeDefinition<TName, PropertyValues> | TName, methodName: string, def: DelegatedActionDef): PackageBuilder;
-		(dependencyType: DependencyDomainTypeRef, methodName: string, def: DelegatedActionDef): PackageBuilder;
-	};
-	readonly instance: {
-		(typeName: string, id: string, values: PropertyValues): PackageBuilder;
-		<TName extends string, TProps extends PropertyValues>(definition: LocalDomainTypeDefinition<TName, TProps>, id: string, values: TProps): PackageBuilder;
-		(dependencyType: DependencyDomainTypeRef, id: string, values: PropertyValues): PackageBuilder;
-	};
-	readonly overlayInstance: (typeNameOrDefinition: string | OverlayDomainTypeDefinition | DependencyDomainTypeRef, sourceInstanceId: string, options?: {
-		readonly overrides?: PropertyValues;
-		readonly suppressed?: boolean;
-	}) => PackageBuilder;
-	readonly actionTransform: (name: string, cb: (builder: ActionTransformBuilder) => void) => PackageBuilder;
-	readonly uiComponent: {
-		(typeName: string, cb: (ui: UiComponentBuilder) => void): PackageBuilder;
-		(reference: InlineElementReference, cb: (ui: UiComponentBuilder) => void): PackageBuilder;
-		<TName extends string, TProps extends PropertyValues, TPublished extends PropertyValues>(definition: DomainTypeDefinition<TName, TProps, TPublished>, cb: (ui: UiComponentBuilder<TProps & TPublished>) => void): PackageBuilder;
-		<TPublished extends Readonly<Record<string, string>>>(dependencyType: DependencyDomainTypeRef<TPublished>, cb: (ui: UiComponentBuilder<{
-			readonly [K in keyof TPublished & string]: FileDomainPropertyValueDto;
-		}>) => void): PackageBuilder;
-	};
-	readonly codeTemplate: (outputFileName: string, templateSource: string) => PackageBuilder;
-	readonly masterDataResource: {
-		(cb: (builder: MasterDataResourceBuilder) => void): PackageBuilder;
-		(definition: MasterDataResourceDefinition): PackageBuilder;
-	};
-	readonly userDataResource: {
-		(cb: (builder: UserDataResourceBuilder) => void): PackageBuilder;
-		(definition: UserDataResourceDefinition): PackageBuilder;
-	};
+/** Declarative package handle returned by `definePackage(...)`. */
+export interface PackageDefinition {
+	readonly kind: "packageDefinition";
 	readonly build: () => BuiltPackage;
 }
-export declare const definePackage: (name: string, version: string) => PackageBuilder;
+/** Declare a GS2 Studio package from immutable definitions. */
+export declare const definePackage: (spec: PackageSpec) => PackageDefinition;
 
 export {
-	MasterDataResourceRef$1 as MasterDataResourceRef,
+	DependencySurface$1 as DependencySurface,
 };
 
 export {};

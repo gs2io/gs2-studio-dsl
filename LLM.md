@@ -5,8 +5,9 @@ Instructions for an agent that writes or edits a GS2 Studio package DSL. Follow 
 
 ## 1. What the DSL is
 
-- A package DSL is a TypeScript module that calls `definePackage(...)` and exports the result of `.build()`.
-  GS2 Studio's `dsl build` command evaluates it, validates the package, and saves it into a GS2 Studio project.
+- A package DSL is a TypeScript module that calls `definePackage({ ... })` and exports the package definition (or the
+  result of `.build()`). GS2 Studio's `dsl build` command evaluates it, validates the package, and saves it into a GS2
+  Studio project.
 - This npm package (`gs2-studio-dsl`) contains type declarations only. It has no runtime; never try to run a DSL with
   Node, `ts-node`, a bundler or a test runner. Only `dsl build` evaluates it.
 - `dsl build` does not type-check. It removes types with Node's type stripping and runs the result. Type errors you do
@@ -19,7 +20,7 @@ Instructions for an agent that writes or edits a GS2 Studio package DSL. Follow 
 ```text
 <project>/                  GS2 Studio project (project.json, packages/)
 <dsl>/
-  index.ts                  the entry: exports exactly one definePackage(...).build() result
+  index.ts                  the entry: exports exactly one definePackage({...}) or .build() result
   id-ledger.json            ids of the package; created by dsl build --write-ledger; commit it
   dependency-surface.json   written by dsl build: what this package publishes to packages that depend on it
   surfaces/<packageId>.json written by dsl surfaces: what each package of the project publishes
@@ -35,19 +36,30 @@ else (see [Modules and imports](REFERENCE.md#modules-and-imports)).
 
 `<GS2 Studio>` is the GS2 Studio executable (the README gives its path per platform).
 
-1. Put every dependency in the project first: install it in GS2 Studio ("Add dependency"), or, for a package you
-   author too, build it into the project with `dsl build`. The DSL cannot install packages.
+To start a new `<dsl>`, run `"<GS2 Studio>" dsl init --dir <project> --out <dsl> --package-id <id>`, then
+`npm install` in `<dsl>` (without `--package-id`, the package id is the name of `<dsl>`). It writes `package.json`,
+`tsconfig.json`, a starter `index.ts`, `surfaces/`, these documents under `docs/`, and an `AGENTS.md` that lists the
+commands below with the executable's path; the first build writes the ledger. It refuses when one of its files exists.
+
+1. Put every dependency in the project first: install it in GS2 Studio ("Add dependency", under any package of the
+   project), or, for a package you author too, build it into the project with `dsl build`. The DSL cannot install
+   packages.
 2. If the package depends on other packages, write their surfaces (one file per package of the project):
    `"<GS2 Studio>" dsl surfaces --dir <project> --out <dsl>/surfaces`
-3. Write or edit `<dsl>/index.ts`.
+3. Write or edit `<dsl>/index.ts`. When the package depends on other packages, declare the dependencies first and build
+   (steps 4 to 7): the build then names the types of the dependencies that need rows from this package.
 4. Type-check: `npx tsc --noEmit -p <dsl>`. Fix every error before building.
 5. First build of a new package:
    `"<GS2 Studio>" dsl build --dir <project> --entry <dsl>/index.ts --write-ledger`
 6. Later builds: the same command without `--write-ledger`. Add `--write-ledger` only when the build reports missing
    ledger tokens for things you added (a type, property, row or transform) and reports no token as "not current".
    A "not current" token means a rename or removal: handle it as in section 4 first.
-7. Open the project in GS2 Studio and fix what it reports. `dsl build` does not run every check the editor and code
-   generation run (for example the binding limits in [Bindings](REFERENCE.md#bindings)).
+7. Read what a build that saved the package prints on stderr: the `[error]` and `[warning]` lines `project check`
+   reports for the project. The build exits with 0 because it saved the package, but each line says what deploy or code
+   generation will do wrong or leave out. Fix each one the DSL can fix (section 6) and build again; tell the user about a
+   line on another package that the DSL does not change. Then open the project in GS2 Studio and fix what it reports:
+   what Unity code generation alone refuses is not printed (see
+   [Building with dsl build](REFERENCE.md#building-with-dsl-build)).
 8. Keep `id-ledger.json` and `dependency-surface.json` with `index.ts`; commit them together.
 
 A build that fails a check writes nothing. On failure, read every listed problem, fix the DSL, and rerun.
@@ -56,22 +68,56 @@ A build that fails a check writes nothing. On failure, read every listed problem
 
 MUST:
 
-- Export exactly one `definePackage(...).build()` result from the entry.
-- Register every domain type definition you use with `.domainType(definition)` on the same package. The order of the
-  calls does not matter.
-- Return the builder from `defineDomainType`, `defineOverlayDomainType` and `defineInlineElement` callbacks by chaining
-  (`dt => dt.property(...).property(...)`). Never use a block body that drops the chain.
+- Export exactly one `definePackage({ ... })` (or `.build()`) result from the entry.
+- Register every domain type definition you reference in `definePackage({ domainTypes: [...] })`. Refer to types,
+  resources and action transforms by their definition handles (never by raw type name strings).
+- Use thunks (`() => Type` or `() => resource`) when two definitions refer to each other or when a definition refers to
+  one declared later in the file.
 - Import types with `import type` or `type` specifiers (`import { type LocalizedDisplay, PT } from "gs2-studio-dsl"`).
 - Name domain types in PascalCase and properties in camelCase. Never declare a property named `id`.
 - Bind every `.masterData()` property in some master data resource and every `.userData()` property in some user data
   resource, or remove the hint.
-- Make sure some resource, of this package or of a dependency, mounts the target type of every `uiComponent`.
+- Make sure some resource, of this package or of a dependency, mounts the target type of every `defineUiComponent`.
+- Before adding UI to a dependency's type, read `types.<Type>.uiComponents` of its surface. Reuse a listed item instead
+  of adding one that shows the same, and give new items unlisted class names: a listed one replaces that item.
 - Give a single-entry type's row the type name in lower case as its id (`GameSettings` → `gamesettings`).
 - Refer to anything of another package only through `dependencyPackage(surface)` built from a surface file that
   `dsl surfaces` wrote (or, for a package you build yourself, the `dependency-surface.json` beside its ledger, which
   has the same content): `dep.type(...)`, `dep.overlay(...)`, `dep.typeId(...)`, `dep.propertyId(...)`,
-  `dep.transformId(...)`, `dep.resourceId(...)`. Declare the dependency with `.dependency(dep.packageId, spec)`; the
-  spec of a package authored in the same project is `"*"` (see [Dependencies](REFERENCE.md#dependencies)).
+  `dep.transformId(...)`, `dep.transformCall(...)`, `dep.transformProgram(...)`, `dep.resourceId(...)`. Declare the
+  dependency in `definePackage({ dependencies: { [dep.packageId]: spec } })`. The spec of a package authored in the same
+  project is `"*"`. An installed package has the spec of its source, as the `dependencies` of
+  `<project>/packages/<packageId>/package.json` of the package that installed it declare it: a package installed from
+  GitHub is `github:<owner>/<repo>[@<range>]` without its subdirectory, and every package of the GS2 Studio package
+  repository is `github:gs2io/gs2-studio-package`. Never give an installed package `"*"`; `dsl build` refuses it and
+  prints the spec to declare (see [Dependencies](REFERENCE.md#dependencies)).
+- Learn what a dependency needs from its surface file, not from its package files: `types.<Type>.propertyDetails`
+  gives each property's `type`, `requirement`, `bindingHint` and, when it has one, its `display` (label and description
+  per locale); `actionTransformSignatures.<Name>` gives each transform's category and parameters (name, type,
+  required and, when it has one, description); `types.<Type>.delegatedActions.<Method>.parameters` gives what a
+  `UiItem.buttonAction` on that method takes as `args`; `types.<Type>.sort` gives the order of its rows, which an overlay of
+  the type keeps unless it sets a `sort` other than id ascending. A `ref<T>` parameter or property takes a row id of `T`.
+- Call a dependency's transform with `dep.transformCall(name, { <parameter>: source })` (spread into an
+  `actionPropertyTransforms` entry) or `dep.transformProgram(name, { <parameter>: source })` (in `actionProgram`),
+  not with `dep.transformId(...)` and hand-written arguments, so `tsc` and `dsl build` check the parameter names. The
+  two name a property differently: `transformCall` takes `{ kind: "domainProperty", propertyName: "<property of the
+  row>" }`, `transformProgram` takes `{ kind: "domainProperty", source: Source.direct(...) }`. See the examples in
+  [Overlay types](REFERENCE.md#overlay-types) and [Action programs](REFERENCE.md#action-programs-and-arguments).
+- Add the rows a dependency's type needs from the project with `instance(dep.type("<Type>"), id, values)` in
+  `definePackage({ instances: [...] })`: every type a build names in `No master data is registered for domain model
+  "<Type>"`. Never author a row whose id a surface lists for the same type (`shippedRowIds`,
+  `shippedRowsOfDependencyTypes`): a package ships it, and a row with its id replaces it (use `overlayInstance`). Take
+  the values from `types.<Type>.propertyDetails` of the surface. Give a value to every `requirement: "always"` property
+  except `id` (the row id), `userData` properties and action lists
+  (`list<consumeAction>` and the other action kinds): a missing one fails the build. An action list you leave out
+  deploys as what `actionPropertyTransforms` add to it, or empty.
+- Choose each property's binding hint by what reads its value, also for a property an overlay adds: the client, from
+  the rows you author (a UI component shows it) → `.assetDelivery()`; only an `actionPropertyTransforms` argument → no
+  hint; a field a master data resource of this package binds → `.masterData()`. See the table in
+  [Property modifiers](REFERENCE.md#property-modifiers).
+- Check the value keys of rows written with a dependency type (`instance(dep.type("Energy"), ...)`) against the
+  published property names yourself: `tsc` does not check them, and `dsl build` refuses an unknown one
+  (`unresolvedPropertySlot`).
 - Regenerate surface files after a dependency changes. Never edit them by hand.
 - In master data, use `Bind.domainProperty` only in a resource mounted on a domain type, and never use
   `Bind.domainProperties` (user data only). `dsl build` accepts both mistakes; the editor and code generation refuse
@@ -101,58 +147,70 @@ Names and ids:
   `property:<Type>.<name>` and row tokens; move each of them. It also changes, without a message, the ids of the
   type's UI component and its items and of user data resources mounted on the type; keep them with
   `deterministicOverrides`. See [The id ledger](REFERENCE.md#the-id-ledger).
+- A row id is letters, digits, `_`, `.` and `-`, at most 128 characters; a resource that binds `id` to a GS2 name sends
+  it as that name (a `micro-economy-quest` `Quest` row id is the quest model name), and some GS2 fields take fewer.
 - A row token contains the row id. Before you treat a "not current" + "missing" row token pair as a rename of a
   composite-key row, check the new row id against the composite key rule below; a wrong id must be fixed in the DSL,
   not moved in the ledger.
 - A composite-key row id is its key values joined with `.` in ascending order of the key members' property ids in the
-  ledger, not in the order passed to `compositeKey(...)`. Build the type with `--write-ledger` before adding its rows,
+  ledger, not in the order passed to `compositeKey`. Build the type with `--write-ledger` before adding its rows,
   read the ids, then add the rows. See [Keys and identity](REFERENCE.md#keys-and-identity).
 
 ## 5. API cheat sheet
 
 | Task | API | Reference |
 | --- | --- | --- |
-| Start a package | `definePackage(id, version)` ... `.build()` | [Packages](REFERENCE.md#packages) |
-| Label the package and its types | `.display(entry)`, `.displayType(definition, entry)` | [Packages](REFERENCE.md#packages) |
-| Declare a type | `defineDomainType(name, dt => dt...)` + `.domainType(definition)` | [Domain types](REFERENCE.md#domain-types) |
-| Declare a property | `PT.int32("count").masterData().required()`, `PT.prop("item", PT.ref("Item"))` | [Properties](REFERENCE.md#properties) |
+| Declare a package | `definePackage({ id, version, display?, dependencies?, domainTypes?, instances?, ... }).build()` | [Packages](REFERENCE.md#packages) |
+| Label a package or type | `display` on `definePackage`; `localizedDisplay` on `defineDomainType` / `defineOverlayDomainType` / `defineInlineElement` | [Packages](REFERENCE.md#packages), [Domain types](REFERENCE.md#domain-types) |
+| Declare a type | `defineDomainType(name, { properties, localizedDisplay?, localizedProperties?, singleEntry?, compositeKey?, sort?, delegatedActions? })` | [Domain types](REFERENCE.md#domain-types) |
+| Declare a property | `PT.int32().masterData().required()`, `PT.ref(Item)`, `PT.enum("a", "b")` in `properties: { name: ... }` | [Properties](REFERENCE.md#properties) |
+| Choose a binding hint | `.assetDelivery()` (the client shows it), none (only a transform argument), `.masterData()` (a resource binds it) | [Property modifiers](REFERENCE.md#property-modifiers) |
+| Text shown in the player's language (a display name) | One `displayName: PT.localizedString().assetDelivery()`, rows `{ ja: "...", en: "..." }`, a `UiItem.label` on it; not one property per language | [Localized text](REFERENCE.md#localized-text) |
+| Localized text in a template or a condition | `templateLabel` placeholder and `UiCond.truthy` / `eq` / `neq` read the player's locale's translation; never `gt`/`lt`, never against a number | [Localized text](REFERENCE.md#localized-text) |
 | Conditional requirement | `.requiredWhen(Cond.eq("limited", true))` | [Conditions](REFERENCE.md#conditions) |
-| Identity and order | `.singleEntry()`, `.compositeKey(...)`, `.sortBy(...)` | [Keys and identity](REFERENCE.md#keys-and-identity) |
-| Author rows | `.instance(definition, id, values)` | [Instances](REFERENCE.md#instances) |
-| Extend a dependency's type | `defineOverlayDomainType(name, dep.overlay(name), dt => ...)` | [Overlay types](REFERENCE.md#overlay-types) |
-| List of structured elements | `defineInlineElement`, `PT.listOf(PT.inlineElement(schema))`, `inlineElementOf` | [Inline elements](REFERENCE.md#inline-elements) |
-| Configure a GS2 master data model | `.masterDataResource(r => r.model(GS2.svc.Model).mountLocal(T).bindings({...}))` | [Master data resources](REFERENCE.md#master-data-resources) |
-| Map GS2 user data to properties | `.userDataResource(r => r.model(...).linkedMasterResourceId(...).bindings({...}))` | [User data resources](REFERENCE.md#user-data-resources) |
+| Identity and order | `singleEntry: true`, `compositeKey: [...]`, `sort: { key, direction? }` | [Keys and identity](REFERENCE.md#keys-and-identity) |
+| Author rows | `instance(definition, id, values)` in `instances: [...]` | [Instances](REFERENCE.md#instances) |
+| Rows a dependency's type needs from the project | `instance(dep.type("Energy"), id, values)` in `instances: [...]` | [Instances](REFERENCE.md#instances) |
+| Change a row a dependency ships | `overlayInstance(type, sourceInstanceId, { overrides?, suppressed? })` in `overlayInstances: [...]` | [Instances](REFERENCE.md#instances) |
+| Extend a dependency's type | `defineOverlayDomainType(name, dep.overlay(name), { properties?, actionPropertyTransforms?, ... })` | [Overlay types](REFERENCE.md#overlay-types) |
+| List of structured elements | `defineInlineElement(name, { properties, elementKey?, ... })`, `PT.listOf(PT.inlineElement(schema))`, `inlineElementOf(Host, "listProp")` | [Inline elements](REFERENCE.md#inline-elements) |
+| Configure a GS2 master data model | `defineMasterDataResource({ model: GS2.svc.Model, mount: T, bindings: {...}, children?, arrayChildren? })` | [Master data resources](REFERENCE.md#master-data-resources) |
+| Map GS2 user data to properties | `defineUserDataResource({ model: GS2.svc.Model, linkedMaster?, mount?, bindings: {...}, children? })` | [User data resources](REFERENCE.md#user-data-resources) |
 | Field values | `Bind.*`, `Source.direct(T, "prop")`, `Source.parent(...)`, `transactionSettingV2()` | [Bindings](REFERENCE.md#bindings) |
-| Actions of an action entry | `ActionProgram.transform(packageId, transformId, [Arg...])` | [Action programs and arguments](REFERENCE.md#action-programs-and-arguments) |
-| Produce GS2 actions from parameters | `.actionTransform(name, t => t.category(...).parameter(...).output(...))` | [Action transforms](REFERENCE.md#action-transforms) |
-| A method that runs a GS2 action | `.delegatedAction(T, "Method", { targetActionKey, targetResource })` | [Delegated actions](REFERENCE.md#delegated-actions) |
-| Generated UI | `.uiComponent(T, ui => ui.label(...).buttonAction(...))`, `UiCond` | [UI components](REFERENCE.md#ui-components) |
-| Code template | `.codeTemplate("File.cs", text)` with a `?raw` import | [Code templates](REFERENCE.md#code-templates) |
-| Use another package of the project | `dependencyPackage(surface)`, `.dependency(dep.packageId, spec)` | [Dependencies](REFERENCE.md#dependencies) |
+| Actions of an action entry | `ActionProgram.transform(transform, [Arg...])`; a dependency's: `dep.transformProgram(name, { count: { kind: "domainProperty", source: Source.parent(Source.direct(T, "count")) } })` | [Action programs and arguments](REFERENCE.md#action-programs-and-arguments) |
+| Add a dependency's transform to an inherited action property | `actionPropertyTransforms: [{ targetProperty, mode: "append", ...dep.transformCall(name, { count: { kind: "domainProperty", propertyName: "price" } }) }]` | [Overlay types](REFERENCE.md#overlay-types) |
+| Produce GS2 actions from parameters | `defineActionTransform(name, { category, parameters, outputs })` + `OutputMap.*` | [Action transforms](REFERENCE.md#action-transforms) |
+| A method that runs a GS2 action | `delegatedActions: { Method: { targetActionKey, targetResource } }` on the type, or `definePackage({ delegatedActions: [{ target, methodName, action: { targetActionKey, targetResource } }] })` | [Delegated actions](REFERENCE.md#delegated-actions) |
+| Generated UI | `defineUiComponent(T, { items: [UiItem.label(...), UiItem.buttonAction(...)] })`, `UiSource.*`, `UiCond.*` | [UI components](REFERENCE.md#ui-components) |
+| Enable a button by another type's row (stamina, coins) | `UiItem.interactable("StartInteractable", UiCond.gte(UiSource.rowProp(energy.type("Energy"), "stamina", "currentValue"), UiSource.prop("staminaCost")))` | [Another type's row](REFERENCE.md#another-types-row) |
+| Choose a UI item and its options | `label` shows text, `templateLabel` text around values, `value` sends a typed value the game formats; a button never disables itself (add `interactable`). `{ name, description }` only label the item in GS2 Studio's editor; leave them out | [UI components](REFERENCE.md#ui-components), [Item options](REFERENCE.md#item-options) |
+| Show every row in the game, in order | A UI component describes one row; the generated `<T>ListHandler` makes one instance of a prefab per row, in the order of `sort` (an overlay: the dependency's order unless it sets a `sort` other than id ascending) | [Rows in the game](REFERENCE.md#rows-in-the-game) |
+| A button on a dependency's delegated action | `UiItem.buttonAction("StartButton", "Start", args, options)`; `args` takes only the names under `types.<T>.delegatedActions.Start.parameters` of the surface and needs each `required: true` one; with none required it may be `undefined` | [Dependencies](REFERENCE.md#dependencies) |
+| Code template | `codeTemplates: [{ outputFileName: "File.cs", templateSource: text }]` with a `?raw` import | [Code templates](REFERENCE.md#code-templates) |
+| Use another package of the project | `dependencyPackage(surface)`, `dependencies: { [dep.packageId]: spec }`; spec `"*"` (authored in the project), or for an installed package the spec the package that installed it declares (`"github:gs2io/gs2-studio-package"` for an official package) | [Dependencies](REFERENCE.md#dependencies) |
 
 ## 6. Common mistakes
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `tsc`: `No overload matches this call` on `.instance(Type, ...)`, property `x` is missing | Typed rows need every `.required()` property, whatever its binding hint. | Give the value; if a user data resource fills `x`, write the row as `.instance("Type", id, values)` instead. |
-| `CLI_DSL_LOAD_FAILED` ... `defineDomainType callback must return the builder it receives` | The callback has a block body or returns something else. | Write `dt => dt.property(...)...`. |
 | `CLI_DSL_LOAD_FAILED` ... `imports X from "gs2-studio-dsl", which exports no value with that name` | A type imported as a value. | Use `import type` / `type X`. |
 | `CLI_DSL_LOAD_FAILED` ... `which a DSL cannot import` | An import other than the published modules, relative `.ts`, `.json` or `?raw` files. | Remove it; inline the code or copy the file into the DSL directory. |
 | `CLI_DSL_LOAD_FAILED` ... `dependency surface: no type named "X"` (or `no property`, `no ActionTransform`) | The name is not in the surface file, or the surface is stale. | Rerun `dsl surfaces`; use a published name. |
-| `CLI_DSL_LOAD_FAILED` ... `ResourceDefinition can only be attached to one graph location` | One resource definition attached twice. | Make a second definition. |
-| `CLI_DSL_EXPORT_INVALID` | Zero or several built packages exported. | Export exactly one `.build()` result. |
-| `{"kind":"domainTypeDefinitionNotRegistered",...}` | A definition used without `.domainType(definition)`. | Register it. |
+| `tsc`: `... is not assignable to parameter of type 'never'` on `dep.transformCall` / `dep.transformProgram`, or `CLI_DSL_LOAD_FAILED` ... `publishes no parameters of ActionTransform` | The surface file was written by a GS2 Studio that did not publish transform signatures. | Rerun `dsl surfaces` (and `dsl build` of a dependency you author). |
+| `tsc`: `Object literal may only specify known properties` in a `transformCall` argument, or `ActionTransform "X" has no parameter "y"` / `needs the required parameter "z"` | A wrong or missing parameter name. The message lists the parameters. | Use the names under `actionTransformSignatures.X.parameters` of the surface. |
+| `CLI_DSL_EXPORT_INVALID` | Zero or several built packages exported. | Export exactly one `definePackage({...})` or `.build()` result. |
+| `{"kind":"domainTypeDefinitionNotRegistered",...}`, `{"kind":"invalidInstanceType",...}`, `{"kind":"uiComponentTargetTypeUnknown",...}` | A definition used (in a mount or binding, a row, a UI component) without being listed in `domainTypes: [...]`. | Include it in `definePackage({ domainTypes: [...] })`. |
 | `{"kind":"reservedPropertyName",...}` | A property named `id`. | Rename it; `id` exists already. |
 | `{"kind":"unresolvedPropertySlot",...}` | A misspelled or undeclared property name in values, overlay options or UI. | Use a declared or published name; the error lists both. |
-| `{"kind":"uiComponentUnknownProperty",...}` / `{"kind":"uiComponentUnknownDelegatedAction",...}` | `ui.prop` or `buttonAction` names something the target lacks. | Declare the property or register the delegated action on that type. |
+| `{"kind":"uiComponentUnknownProperty",...}` / `{"kind":"uiComponentUnknownDelegatedAction",...}` | `UiSource.prop` or `UiItem.buttonAction` names something the target lacks. | Declare the property or register the delegated action on that type. |
 | `{"kind":"duplicateUiComponentClassName",...}` | Two items of the same type share a class name. | Make class names unique per type. |
 | `{"kind":"uiComponentTemplateLabelKeyMismatch",...}` | `{key}` placeholders and `sources` keys differ. | Make them match one to one. |
 | `{"kind":"singleEntryInstanceIdMismatch",...,"expectedId":"..."}` | Wrong row id on a single-entry type. | Use `expectedId`. |
 | `{"kind":"invalidCompositeKey","reason":"unsupportedMemberBindingHint",...}` | A key member without `masterData` / `assetDelivery`. | Add the hint. |
 | `{"kind":"invalidSortKey","reason":"notRequired",...}` | Sorting by an optional property. | Make it `.required()` or sort by `"id"`. |
 | `{"kind":"invalidBindingValue",...}` | A binding kind the resource does not accept (for example `Bind.resourceKey()` on user data), a malformed directive, or an inline schema used twice. | Read `context`; use an accepted kind. |
-| `{"kind":"unresolvedResourceRef",...}` | `resourceRef(() => x)` or `linkedMasterResourceId(x)` names a resource never attached to the package. | Attach the resource with `masterDataResource` / `addChild` / `addArrayChild`. |
+| `{"kind":"unresolvedResourceRef",...}` | A `resource`, `linkedMaster`, `resourceLink` or `mountedResource` handle names a resource never included in the package's `masterDataResources` / `userDataResources` trees. | Include the resource in `masterDataResources`, `userDataResources`, `children`, or `arrayChildren`. |
+| `{"kind":"resourceDefinitionAttachedTwice",...}` | One resource definition included in two places (two `children` lists, or a root and a child). | Make a second definition with its own `defineMasterDataResource` / `defineUserDataResource`. |
 | `{"kind":"unresolvedParentBinding",...}` | `Source.parent(...)` on a root resource. | Use `Source.direct(...)`, or move the resource under a parent. |
 | `CLI_DSL_LEDGER_MISSING` | First build without `--write-ledger`. | Add `--write-ledger`. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `random token ... is missing from the ledger`, and no token is "not current" | You added something. | Check the tokens, then rebuild with `--write-ledger`. |
@@ -162,7 +220,14 @@ Names and ids:
 | `CLI_DSL_VALIDATION_FAILED` ... `No user data resource binds this property.` | A `.userData()` property no resource binds. | Bind it in a user data resource (`Bind.domainProperty` / `Bind.domainProperties` with `Source.direct(T, "prop")`), or remove the hint. |
 | `CLI_DSL_VALIDATION_FAILED` ... `is not mounted by any resource` | A UI component on a type no resource mounts. | Mount the type with a resource, or remove the component. |
 | `CLI_DSL_VALIDATION_FAILED` ... `instance ids that no longer match their composite-key values` | Row ids not composed from key values in property-id order. | Recompose ids per [Keys and identity](REFERENCE.md#keys-and-identity). |
-| `CLI_DSL_DEPENDENCY_NOT_INSTALLED` | `.dependency(...)` names a package the project lacks. | A package authored in the project: build it with `dsl build` first. Another package: add it in GS2 Studio. |
+| `CLI_DSL_DEPENDENCY_NOT_INSTALLED` | `dependencies` names a package the project lacks. | A package authored in the project: build it with `dsl build` first. Another package: add it in GS2 Studio. |
+| `CLI_DSL_PACKAGE_INVALID` ... `Invalid GitHub dependency spec: github:<owner>/<repo>/<dir>` | A subdirectory in a GitHub spec. | Use `github:<owner>/<repo>`; the project's lock records the directory. |
+| `CLI_DSL_DEPENDENCY_SPEC_MISMATCH` | `dependencies` gives an installed package a spec that names another source than the one the project installed it from, such as `"*"`. | Declare it with the spec the message prints, then build again. |
+| `CLI_DSL_VALIDATION_FAILED` ... `the parent <resource> resource has no row` ... `Add a row of "T"` | Rows of a dependency's type sit under a GS2 resource made from rows of `T`, which nobody authored. | Add a row of `T` with `instance(dep.type("T"), id, values)` and point your rows at it (for example the `collection` of a quest row). |
+| `... is a dependency the DSL cannot change, so these are fixed through the dependency that brings it in: ...` | A defect of the dependency itself, not of this DSL. | If the message says to remove the dependency `"X"` from the DSL and the package does not need X, remove it and what refers to it. Otherwise tell the user: the project's owner updates or removes the dependency in GS2 Studio, as the message says. |
+| A successful build prints `[warning] ... No master data is registered for domain model "T"` | A dependency's GS2 resource needs rows of `T` from the project; it is not deployed without them. | Add the row the message names, `instance(dep.type("T"), id, values)`, with the values it names, and build again. `dep.type("<Type>")` means the message names no type `dep.type()` takes: for an inline schema, add elements to the host type's list property with `dep.inlineElements(...)`; for an unresolved type, find it in the surfaces. |
+| A successful build prints `[error] ... the required arguments (...) of action transform ... have no value for row "r"` | An `actionPropertyTransforms` argument reads a property row `r` has no value for. | Give the row the value; for a row a dependency ships, use `overlayInstance(type, "r", { overrides })`. |
+| A UI item of a property you added shows nothing (or `0`) in the game | The property has no binding hint, so the client never gets its value. | Give it `.assetDelivery()`. |
 
 ## 7. Minimal complete example
 
@@ -172,13 +237,19 @@ It builds with `dsl build` as shown in the workflow.
 ```ts
 import {
   Bind,
+  defineActionTransform,
   defineDomainType,
   defineMasterDataResource,
   definePackage,
+  defineUiComponent,
+  defineUserDataResource,
   type LocalizedDisplay,
+  OutputMap,
   PT,
   Source,
   UiCond,
+  UiItem,
+  UiSource,
 } from "gs2-studio-dsl";
 import { GS2 } from "gs2-studio-dsl/gs2";
 
@@ -186,93 +257,121 @@ function text(label: string, description: string): LocalizedDisplay {
   return { en: { label, description } };
 }
 
-const Item = defineDomainType("Item", dt =>
-  dt.property(PT.int64("count").userData().required()).localizedProperties({
+const Item = defineDomainType("Item", {
+  properties: {
+    count: PT.int64().userData().required(),
+  },
+  localizedDisplay: text("Item", "An item a player can own."),
+  localizedProperties: {
     id: text("ID", "Identifies the item."),
     count: text("Owned quantity", "How many of the item the player owns."),
-  })
-);
+  },
+});
 
-const SimpleItemModel = defineMasterDataResource(resource =>
-  resource
-    .model(GS2.inventory.SimpleItemModel)
-    .mountLocal(Item)
-    .bindings({
-      name: Bind.domainProperty(Source.direct(Item, "id")),
-    })
-);
+const SimpleItemModel = defineMasterDataResource({
+  model: GS2.inventory.SimpleItemModel,
+  mount: Item,
+  bindings: {
+    name: Bind.domainProperty(Source.direct(Item, "id")),
+  },
+});
 
-export const exampleInventory = definePackage("example-inventory", "0.0.1")
-  .display(text("Items", "Tracks the items a player owns."))
-  .displayType(Item, text("Item", "An item a player can own."))
-  .domainType(Item)
-  .masterDataResource(namespace =>
-    namespace
-      .model(GS2.inventory.Namespace)
-      .bindings({
+const AcquireItem = defineActionTransform("AcquireItem", {
+  category: "acquire",
+  parameters: {
+    itemName: { type: PT.ref(Item) },
+    count: { type: PT.int32() },
+  },
+  outputs: [
+    {
+      kind: "direct",
+      actionName: "Gs2Inventory:AcquireSimpleItemsByUserId",
+      resource: SimpleItemModel,
+      parameterMappings: {
+        namespaceName: OutputMap.resourceKey(),
+        inventoryName: OutputMap.resourceKey(),
+        userId: OutputMap.placeholder("#{userId}"),
+        "acquireCounts[0].itemName": OutputMap.parameter("itemName"),
+        "acquireCounts[0].count": OutputMap.parameter("count"),
+      },
+    },
+  ],
+});
+
+const ConsumeItem = defineActionTransform("ConsumeItem", {
+  category: "consume",
+  parameters: {
+    itemName: { type: PT.ref(Item) },
+    count: { type: PT.int32() },
+  },
+  outputs: [
+    {
+      kind: "direct",
+      actionName: "Gs2Inventory:ConsumeSimpleItemsByUserId",
+      resource: SimpleItemModel,
+      parameterMappings: {
+        namespaceName: OutputMap.resourceKey(),
+        inventoryName: OutputMap.resourceKey(),
+        userId: OutputMap.placeholder("#{userId}"),
+        "consumeCounts[0].itemName": OutputMap.parameter("itemName"),
+        "consumeCounts[0].count": OutputMap.parameter("count"),
+      },
+    },
+  ],
+});
+
+export const exampleInventory = definePackage({
+  id: "example-inventory",
+  version: "0.0.1",
+  display: text("Items", "Tracks the items a player owns."),
+  domainTypes: [Item],
+  masterDataResources: [
+    defineMasterDataResource({
+      model: GS2.inventory.Namespace,
+      bindings: {
         name: Bind.static("Inventory"),
-      })
-      .addChild(inventory => {
-        inventory
-          .model(GS2.inventory.SimpleInventoryModel)
-          .bindings({
+      },
+      children: [
+        defineMasterDataResource({
+          model: GS2.inventory.SimpleInventoryModel,
+          bindings: {
             name: Bind.static("Inventory"),
-          })
-          .addArrayChild("simpleItemModels", SimpleItemModel);
-      })
-  )
-  .userDataResource(item =>
-    item
-      .model(GS2.inventory.SimpleItem)
-      .linkedMasterResourceId(SimpleItemModel)
-      .bindings({
+          },
+          arrayChildren: {
+            simpleItemModels: [SimpleItemModel],
+          },
+        }),
+      ],
+    }),
+  ],
+  userDataResources: [
+    defineUserDataResource({
+      model: GS2.inventory.SimpleItem,
+      linkedMaster: SimpleItemModel,
+      bindings: {
         count: Bind.domainProperties([Source.direct(Item, "count")]),
         itemName: Bind.skip(),
         userId: Bind.skip(),
-      })
-  )
-  .uiComponent(Item, ui =>
-    ui
-      .templateLabel(
-        "StockLabel",
-        "{id} x{count}",
-        { id: ui.prop("id"), count: ui.prop("count") },
-        { name: "Item" }
-      )
-      .value("CountValue", ui.prop("count"), { name: "Item" })
-      .interactable("OwnedInteractable", UiCond.gt(ui.prop("count"), ui.lit(0)), { name: "Item" })
-  )
-  .actionTransform("AcquireItem", transform =>
-    transform
-      .category("acquire")
-      .parameter("itemName", { type: PT.ref("Item") })
-      .parameter("count", { type: PT.int32() })
-      .output("Gs2Inventory:AcquireSimpleItemsByUserId", output =>
-        output
-          .resourceRef(() => SimpleItemModel)
-          .mapResourceKey("namespaceName")
-          .mapResourceKey("inventoryName")
-          .mapPlaceholder("userId", "#{userId}")
-          .mapParameter("acquireCounts[0].itemName", "itemName")
-          .mapParameter("acquireCounts[0].count", "count")
-      )
-  )
-  .actionTransform("ConsumeItem", transform =>
-    transform
-      .category("consume")
-      .parameter("itemName", { type: PT.ref("Item") })
-      .parameter("count", { type: PT.int32() })
-      .output("Gs2Inventory:ConsumeSimpleItemsByUserId", output =>
-        output
-          .resourceRef(() => SimpleItemModel)
-          .mapResourceKey("namespaceName")
-          .mapResourceKey("inventoryName")
-          .mapPlaceholder("userId", "#{userId}")
-          .mapParameter("consumeCounts[0].itemName", "itemName")
-          .mapParameter("consumeCounts[0].count", "count")
-      )
-  )
-  .build();
+      },
+    }),
+  ],
+  uiComponents: [
+    defineUiComponent(Item, {
+      items: [
+        UiItem.templateLabel("StockLabel", "{id} x{count}", {
+          id: UiSource.prop("id"),
+          count: UiSource.prop("count"),
+        }),
+        UiItem.value("CountValue", UiSource.prop("count")),
+        UiItem.interactable(
+          "OwnedInteractable",
+          UiCond.gt(UiSource.prop("count"), UiSource.lit(0))
+        ),
+      ],
+    }),
+  ],
+  actionTransforms: [AcquireItem, ConsumeItem],
+});
 ```
 
 Its `id-ledger.json` after the first `dsl build --write-ledger`:
@@ -292,4 +391,5 @@ Its `id-ledger.json` after the first `dsl build --write-ledger`:
 ```
 
 For dependencies, overlays, delegated actions and code templates, read the `example-gift-shop` sections of
-[REFERENCE.md](REFERENCE.md#dependencies).
+[REFERENCE.md](REFERENCE.md#dependencies). For an overlay that appends a dependency's transform to an inherited action
+property with `dep.transformCall`, read `example-gift-sale` in [Overlay types](REFERENCE.md#overlay-types).

@@ -9,11 +9,11 @@ type-check; use these declarations in your editor and with `tsc --noEmit`.
 - For LLM coding agents: [LLM.md](LLM.md)
 
 ```sh
-npm install --save-dev gs2-studio-dsl@2026.11.10
+npm install --save-dev gs2-studio-dsl@2026.11.13
 ```
 
 The version is the GS2 Studio version whose DSL these declarations describe: a DSL written
-against gs2-studio-dsl 2026.11.10 builds with GS2 Studio 2026.11.10 and later. Install the version that
+against gs2-studio-dsl 2026.11.13 builds with GS2 Studio 2026.11.13 and later. Install the version that
 matches the oldest GS2 Studio you build with.
 
 ```ts
@@ -47,7 +47,9 @@ parameter properties), and type-only imports must be marked with `import type`:
     "erasableSyntaxOnly": true,
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
-    "types": ["gs2-studio-dsl/raw"]
+    "types": [
+      "gs2-studio-dsl/raw"
+    ]
   }
 }
 ```
@@ -60,9 +62,13 @@ parameter properties), and type-only imports must be marked with `import type`:
 The GS2 Studio executable runs the `dsl` commands headless and exits with their exit code:
 
 ```sh
+# start a DSL directory for the project: package.json, this tsconfig, a starter index.ts, docs/LLM.md,
+# docs/REFERENCE.md, AGENTS.md (CLAUDE.md) with these commands, and surfaces/; then run npm install in it
+"<GS2 Studio>" dsl init --dir <project> --out <dsl> --package-id <id>
 # write <out>/<packageId>.json for each package of the project (installed or authored in it)
 "<GS2 Studio>" dsl surfaces --dir <project> --out <out>
-# evaluate the DSL, check it, and save the package into the project (--write-ledger the first time)
+# evaluate the DSL, check it, and save the package into the project (--write-ledger the first time);
+# after saving it prints the [error] and [warning] lines project check reports, and exits with 0
 "<GS2 Studio>" dsl build --dir <project> --entry <dsl/index.ts> --write-ledger
 ```
 

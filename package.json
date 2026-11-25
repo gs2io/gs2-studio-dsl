@@ -1,6 +1,6 @@
 {
   "name": "gs2-studio-dsl",
-  "version": "2026.11.10",
+  "version": "2026.11.13",
   "description": "Type definitions for the GS2 Studio package DSL.",
   "license": "Apache-2.0",
   "repository": {
