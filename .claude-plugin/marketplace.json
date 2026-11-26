@@ -1,0 +1,12 @@
+{
+  "name": "gs2-studio-dsl",
+  "description": "Agent skills for building GS2 games with GS2 Studio",
+  "owner": { "name": "Game Server Services" },
+  "plugins": [
+    {
+      "name": "gs2-studio",
+      "source": "./plugins/gs2-studio",
+      "description": "Lets a coding agent find the installed GS2 Studio and follow its own guide to set up a project and write its package DSL"
+    }
+  ]
+}

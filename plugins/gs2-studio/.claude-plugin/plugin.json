@@ -1,0 +1,8 @@
+{
+  "name": "gs2-studio",
+  "description": "Lets a coding agent find the installed GS2 Studio and follow its own guide to set up a project and write its package DSL",
+  "version": "0.1.0",
+  "author": {
+    "name": "Game Server Services"
+  }
+}
