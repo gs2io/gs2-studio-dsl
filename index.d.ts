@@ -544,6 +544,11 @@ export type UiItemSpec<TName extends string = string> = ({
 	readonly componentClassName: string;
 	readonly source: UiPropertySourceSpec<TName>;
 } & UiItemOptions) | ({
+	readonly kind: "countdown";
+	readonly componentClassName: string;
+	readonly source: UiPropertySourceSpec<TName>;
+	readonly fallbackText?: string;
+} & UiItemOptions) | ({
 	readonly kind: "image";
 	readonly componentClassName: string;
 	readonly source: UiValueSourceSpec<TName>;
@@ -605,6 +610,9 @@ export declare const UiItem: {
 		readonly fallbackText?: string;
 	}) => UiItemSpec<TName>;
 	readonly value: <TName extends string = never>(componentClassName: string, source: NoInfer<UiPropertySourceSpec<TName>>, options?: UiItemOptions) => UiItemSpec<TName>;
+	readonly countdown: <TName extends string = never>(componentClassName: string, source: NoInfer<UiPropertySourceSpec<TName>>, options?: UiItemOptions & {
+		readonly fallbackText?: string;
+	}) => UiItemSpec<TName>;
 	readonly image: <TName extends string = never>(componentClassName: string, source: NoInfer<UiValueSourceSpec<TName>>, imageMode: UiImageMode, options?: UiItemOptions & {
 		readonly fallback?: string;
 	}) => UiItemSpec<TName>;

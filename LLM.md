@@ -41,9 +41,9 @@ To start a new `<dsl>`, run `"<GS2 Studio>" dsl init --dir <project> --out <dsl>
 `tsconfig.json`, a starter `index.ts`, `surfaces/`, these documents under `docs/`, and an `AGENTS.md` that lists the
 commands below with the executable's path; the first build writes the ledger. It refuses when one of its files exists.
 
-1. Put every dependency in the project first: install it in GS2 Studio ("Add dependency", under any package of the
-   project), or, for a package you author too, build it into the project with `dsl build`. The DSL cannot install
-   packages.
+1. Put every dependency in the project first: add it with `"<GS2 Studio>" package add --dir <project> ...`
+   (`"<GS2 Studio>" package search` finds it and prints the arguments), or, for a package you author too, build it into
+   the project with `dsl build`. The DSL cannot install packages.
 2. If the package depends on other packages, write their surfaces (one file per package of the project):
    `"<GS2 Studio>" dsl surfaces --dir <project> --out <dsl>/surfaces`
 3. Write or edit `<dsl>/index.ts`. When the package depends on other packages, declare the dependencies first and build
@@ -98,6 +98,10 @@ MUST:
   Start while a quest is in progress (`alreadyExists`). A player with no quest in progress, including one who never
   started any, still has that row, with `inProgress` `false`, so this check passes once the `ProgressHandler` has loaded.
   See [Rows in the game](REFERENCE.md#rows-in-the-game).
+- Show the time left until a timestamp (a stamina's next recovery) with a `UiItem.countdown`, or the one a dependency
+  lists in `types.<Type>.uiComponents` (`foundation-economy-energy`'s `NextRecoveryCountdown`), never with a hand-written
+  timer: it counts on the session's GS2 clock, which `DateTime.UtcNow` is not. See
+  [UI components](REFERENCE.md#ui-components).
 - Place an `activeToggle` such as `ProgressIdleActiveToggle` on a GameObject that stays active below the type's
   Handler, with what it shows or hides as its targets, never on a GameObject it hides: once hidden it stops listening
   and never shows it again. See [UI components](REFERENCE.md#ui-components).
@@ -251,7 +255,7 @@ Names and ids:
 | A method that runs a GS2 action | `delegatedActions: { Method: { targetActionKey, targetResource } }` on the type, or `definePackage({ delegatedActions: [{ target, methodName, action: { targetActionKey, targetResource } }] })` | [Delegated actions](REFERENCE.md#delegated-actions) |
 | Generated UI | `defineUiComponent(T, { items: [UiItem.label(...), UiItem.buttonAction(...)] })`, `UiSource.*`, `UiCond.*` | [UI components](REFERENCE.md#ui-components) |
 | Enable a button by another type's row (stamina, coins) | `UiItem.interactable("StartInteractable", UiCond.gte(UiSource.rowProp(energy.type("Energy"), "stamina", "currentValue"), UiSource.prop("cost")))` | [Another type's row](REFERENCE.md#another-types-row) |
-| Choose a UI item and its options | `label` shows text, `templateLabel` text around values, `value` sends a typed value the game formats; a button never disables itself (add `interactable`). `{ name, description }` only label the item in GS2 Studio's editor; leave them out | [UI components](REFERENCE.md#ui-components), [Item options](REFERENCE.md#item-options) |
+| Choose a UI item and its options | `label` shows text, `templateLabel` text around values, `countdown` the time left until a timestamp, `value` sends a typed value the game formats; a button never disables itself (add `interactable`). `{ name, description }` only label the item in GS2 Studio's editor; leave them out | [UI components](REFERENCE.md#ui-components), [Item options](REFERENCE.md#item-options) |
 | Show every row in the game, in order | A UI component describes one row; the generated `<T>ListHandler` makes one instance of a prefab per row, in the order of `sort` (an overlay: the dependency's order unless it sets a `sort` other than id ascending) | [Rows in the game](REFERENCE.md#rows-in-the-game) |
 | A button on a dependency's delegated action | `UiItem.buttonAction("ReceiveButton", "Receive", args, options)` (first check `types.<T>.uiComponents`, keyed by class name without the `<T>` prefix: a package may already ship the button); `args` takes only the names under `types.<T>.delegatedActions.Receive.parameters` of the surface and needs each `required: true` one; with none required it may be `undefined` | [Dependencies](REFERENCE.md#dependencies) |
 | Code template | `codeTemplates: [{ outputFileName: "File.cs", templateSource: text }]` with a `?raw` import | [Code templates](REFERENCE.md#code-templates) |
@@ -482,10 +486,9 @@ The game signs in to GS2 with a client ID and a client secret. Take them from th
 - In Unity, they go into a `Gs2Environment` asset (Create > Game Server Services > Core > Environment) with `region`,
   `clientId`, `clientSecret` and `name`. `Gs2ClientHolder` lists the asset under Environments, and its Active
   Environment Name must equal the asset's `name` field, not its file name.
-- The GS2 Studio executable runs only `dsl` commands, so ask the user for the values: in GS2 Studio, they sign in to
-  GS2 and choose the destination on Publish, then press "Copy settings" under "Gs2Environment settings" on the Usage
-  tab of a table in Simple mode (Region, Client ID, Client Secret). Until GS2 Studio has read the values, it copies
-  `YOUR_CLIENT_ID` and `YOUR_CLIENT_SECRET`; never put those into the game.
-- In a checkout of the GS2 Studio repository, its development CLI (`npx vite-node cli/gs2studio.ts`) reads them:
-  `deploy outputs --stack Default --project <project> --region <region>`. It signs in with the developer's account only
-  to read them; only the two output values go into the game.
+- `"<GS2 Studio>" deploy unity-environment --unity-project <unity>` writes them into
+  `Assets/GS2Studio/Gs2Environment.asset` (environment name `GS2Studio`) without printing them; pass `--project` and
+  `--region`. It signs in with the developer's account only to read them, with the sign-in the user saved by running
+  `"<GS2 Studio>" login` in their own terminal (your shell cannot answer its password prompt: ask the user to run it);
+  only the two output values go into the game. `deploy outputs --stack Default` prints them; do not run it where the
+  terminal is recorded or shared.

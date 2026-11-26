@@ -9,11 +9,11 @@ type-check; use these declarations in your editor and with `tsc --noEmit`.
 - For LLM coding agents: [LLM.md](LLM.md)
 
 ```sh
-npm install --save-dev gs2-studio-dsl@2026.11.16
+npm install --save-dev gs2-studio-dsl@2026.11.17
 ```
 
 The version is the GS2 Studio version whose DSL these declarations describe: a DSL written
-against gs2-studio-dsl 2026.11.16 builds with GS2 Studio 2026.11.16 and later. Install the version that
+against gs2-studio-dsl 2026.11.17 builds with GS2 Studio 2026.11.17 and later. Install the version that
 matches the oldest GS2 Studio you build with.
 
 ```ts
@@ -73,9 +73,12 @@ The GS2 Studio executable runs the `dsl` commands headless and exits with their 
 "<GS2 Studio>" dsl build --dir <project> --entry <dsl/index.ts> --write-ledger
 ```
 
-`<GS2 Studio>` is `/Applications/GS2 Studio.app/Contents/MacOS/GS2 Studio` on macOS and the
-`GS2-Studio-<version>-linux-<arch>.AppImage` file on Linux. On Windows the executable does not write to the console, so the commands cannot
-be run from a terminal yet. `--help` after `dsl` lists every option.
+`<GS2 Studio>` is `/Applications/GS2 Studio.app/Contents/MacOS/GS2 Studio` on macOS, the
+`GS2-Studio-<version>-linux-<arch>.AppImage` file on Linux, and `bin\gs2studio.cmd` in the install directory on Windows. `gs2studio`
+runs it when it is on PATH (the installer puts it there on Windows; on macOS and Linux, "Install 'gs2studio' Command in PATH"
+in the app's menu). `"<GS2 Studio>" guide` prints every step from creating a project and adding packages, through
+`dsl init`, to deploying to GS2 and generating the Unity code.
+`--help` lists every command and option.
 
 ## License
 

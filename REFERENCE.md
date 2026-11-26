@@ -406,8 +406,10 @@ UiItem.label("NameLabel", UiSource.prop("displayName")),
 - Only `.assetDelivery()` is accepted: no GS2 resource field holds text per locale, so it is neither a binding nor an
   action transform argument. It cannot be a list element, a key or sort member, a transform parameter, or a property of
   an inline element.
-- Unity: generated code reads it as `Gs2Bind.Localization.Gs2LocalizedText`, which `io.gs2.bind` releases after
-  2026.9.11 provide; a project without localized properties needs no newer `io.gs2.bind`.
+- Unity: generated code reads it as `Gs2Bind.Localization.Gs2LocalizedText`, which `io.gs2.bind` 2026.11.1 and later
+  provide, so code generation raises the Unity project's `io.gs2.bind` to that release and `io.gs2.unity.sdk` /
+  `io.gs2.csharp.sdk` to 2026.11.12 / 2026.11.9, the SDKs it compiles against (it never lowers a pin). A project
+  without localized properties needs no newer `io.gs2.bind`.
   A `label` shows the translation for `Gs2Locale.Current`: the exact locale, then the same language, then `en`, then
   `ja`, then the first one. The locale starts from the device language; with `com.unity.localization` installed it
   follows Unity Localization's selected locale with nothing to set up, and without it the game calls
@@ -1136,6 +1138,7 @@ row again when it is shown. `interactable` changes only `interactable`, so it ca
 | --- | --- | --- |
 | `UiItem.label(className, source, options?)` | `source`: `UiSource.prop(...)` or `UiSource.lit(...)`. `options.fallbackText`: the text sent while the property has no value. | Sends the value as text through `OnUpdate` (`UnityEvent<string>`). A `timestamp` is written `yyyy-MM-dd HH:mm`; other values are converted with `Convert.ToString`, so a list or inline element property does not show its contents. A `PT.localizedString` source sends the translation for the player's locale and sends again when the locale changes ([Localized text](#localized-text)); of the other items only `templateLabel` and the `UiCond` of `activeToggle` and `interactable` accept that source. |
 | `UiItem.value(className, propertySource, options?)` | `propertySource`: `UiSource.prop(...)` of a property of a primitive type, a `ref`, or `"id"`. No literal. | Sends the value in its own C# type through `OnUpdate`: `UnityEvent<int>` for `int32`, `long` for `int64`, `float`, `double`, `bool`, `string`, `DateTime` for `timestamp`, and `string` for a `ref` or `"id"`. A missing value is sent as the type's default (`0`, `""`). `Select(value)` raises `OnSelect` with a value the game passes. Any other property type (`enum`, a list, an inline element) leaves the item out with a warning. |
+| `UiItem.countdown(className, propertySource, options?)` | `propertySource`: `UiSource.prop(...)` of a `timestamp` property. No literal. `options.fallbackText`: the text sent while the property holds no time. | Counts down to the time on GS2's clock for the player's session (UTC shifted by the access token's time offset) with GS2-Bind's `Gs2Countdown`, so code generation raises the Unity project's `io.gs2.bind` to 2026.11.3 or later, with `io.gs2.unity.sdk` 2026.11.12 and `io.gs2.csharp.sdk` 2026.11.9 or later. Once a second, reading the clock each time, and again whenever the row changes, it sends the time left as text through `OnUpdate` (`UnityEvent<string>`: `m:ss`, `h:mm:ss` from an hour on) and in whole seconds through `OnRemaining` (`UnityEvent<TimeSpan>`), ending at `0:00`; `OnCounting` (`UnityEvent<bool>`) sends `true` when it starts. A time of 0 or before, or no value, is no time (GS2's next recovery of a full stamina): it sends the fallback text through `OnUpdate` and `false` through `OnCounting`, and nothing through `OnRemaining`. It reads the session from the scene's `Gs2HolderRuntimeContextProvider` (or the provider given to its `SetRuntimeProvider`) and warns once when there is none, counting on UTC alone. Any other property type leaves the item out with a warning. |
 | `UiItem.templateLabel(className, template, sources, options?)` | `template` with `{key}` placeholders; `sources` maps each key to a source. Every placeholder needs exactly one source and every source a placeholder. `options.fallbackText`: the text sent while no row is loaded. | Sends `template` with each `{key}` replaced by its value through `OnUpdate` (`UnityEvent<string>`). A `PT.localizedString` source is replaced by the translation for the player's locale, and the text is sent again when the locale changes ([Localized text](#localized-text)). |
 | `UiItem.image(className, source, imageMode, options?)` | `imageMode`: `"spriteResourcePath"`, `"addressableKey"`, `"url"` or `"assetReference"`. `options.fallback`: the reference used while the property has no value. | Calls `partial void ApplyImage(Image target, string reference)`, which the game implements in its own part of the class to load the image; `ImageMode` names the mode. The generated code loads nothing. |
 | `UiItem.gauge(className, current, max, options?)` | Numeric sources. `options.min` accepts the same sources as `max` and defaults to 0; `options.clamp` (default `true`) keeps the fill between 0 and 1. | Sets `fillAmount` of its target `Image` to `(current - min) / (max - min)`, or 0 when that range is not positive. A non-numeric source leaves the item out with a warning. |
@@ -1143,8 +1146,8 @@ row again when it is shown. `interactable` changes only `interactable`, so it ca
 | `UiItem.activeToggle(className, condition, options?)` | A `UiCond` condition. | Activates the GameObjects in `_activeWhenTrue` and deactivates those in `_activeWhenFalse` while the condition holds, and the reverse while it does not. List siblings or children, never the component's own GameObject or an ancestor of it (see above). |
 | `UiItem.interactable(className, condition, options?)` | A `UiCond` condition. | Sets `interactable` of the `Selectable`s (such as a `Button`) in `_interactableWhenTrue` to the condition and of those in `_interactableWhenFalse` to its negation. |
 
-Choose `label` for a value shown as text as it is, `templateLabel` for text with words around values, and `value` for a
-value the game formats or uses itself (a number it animates, a date it counts down to). Sources read only the target row,
+Choose `label` for a value shown as text as it is, `templateLabel` for text with words around values, `countdown` for
+the time left until a timestamp, and `value` for a value the game formats or uses itself (a number it animates). Sources read only the target row,
 apart from the table band sources of `gauge`; a condition also reads the parent row with `UiCond.rowElement` and one row
 of any type with `UiSource.rowProp`.
 
@@ -1278,6 +1281,10 @@ component and no `UiSource.rowProp`, unless your package mounts its overlay of t
 
 A list shows the rows GS2 holds at run time (the deployed master data, or the player's user data), each with the values
 of its asset-delivered properties.
+
+To show the time left until a timestamp of a row, such as a stamina's next recovery, use a `UiItem.countdown` (or the one
+the dependency lists in `types.<Type>.uiComponents`) instead of a hand-written timer: it counts on the session's GS2 clock,
+which `DateTime.UtcNow` is not.
 
 A dependency's own UI components are generated with it, so a dependency used as it is needs nothing in the DSL beyond
 the dependency and what its surface asks for. `foundation-economy-currency` is an example: the transforms that deposit
