@@ -9,11 +9,11 @@ type-check; use these declarations in your editor and with `tsc --noEmit`.
 - For LLM coding agents: [LLM.md](LLM.md)
 
 ```sh
-npm install --save-dev gs2-studio-dsl@2026.11.14
+npm install --save-dev gs2-studio-dsl@2026.11.15
 ```
 
 The version is the GS2 Studio version whose DSL these declarations describe: a DSL written
-against gs2-studio-dsl 2026.11.14 builds with GS2 Studio 2026.11.14 and later. Install the version that
+against gs2-studio-dsl 2026.11.15 builds with GS2 Studio 2026.11.15 and later. Install the version that
 matches the oldest GS2 Studio you build with.
 
 ```ts

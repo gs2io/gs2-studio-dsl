@@ -214,7 +214,9 @@ const Item = defineDomainType("Item", {
 ```
 
 The handle carries its declared property names in its TypeScript type, so `sort`, `compositeKey`,
-`localizedProperties`, `Source.direct(definition, ...)` and `instance(definition, ...)` are checked by `tsc`.
+`localizedProperties`, `Source.direct(definition, ...)`, `instance(definition, ...)` and the `UiSource.prop(...)` names of
+`defineUiComponent(definition, ...)` are checked by `tsc`. An overlay's handle and `dep.type("T")` carry their names
+too, the published ones taken from the surface file ([Property names are type-checked](#property-names-are-type-checked)).
 
 | Field | Records |
 | --- | --- |
@@ -230,6 +232,52 @@ A definition does nothing until it is registered in `definePackage({ domainTypes
 definition in a resource mount, a binding source or a package-level delegated action fails the build with
 `domainTypeDefinitionNotRegistered`, in an instance with `invalidInstanceType`, and as a UI component's target with
 `uiComponentTargetTypeUnknown`. Two types with the same name fail with `duplicateDomainTypeName`.
+
+### Property names are type-checked
+
+A property name written as a string compiles only when the type it names has that property, and the error lists the names
+it has. `tsc` checks the names in `UiSource.prop(...)` against the target of `defineUiComponent`, in
+`UiSource.rowProp(type, rowId, name)` against `type`, in `sort`, `compositeKey`, `localizedProperties`, `targetProperty`
+and a transform argument against the type that declares them, in `Source.direct(type, name)` against
+`type`, and the value keys of `instance(...)` and `overlayInstance(...)` against the row's type. An overlay's names are
+the ones it adds and the ones its source publishes; `localizedProperties` takes only the added ones and `"id"`.
+
+`tsc` reports a wrong name on the name itself (`Type '"x"' is not assignable to type ...`, `Argument of type '"x"' is not
+assignable to parameter of type ...` or `'x' does not exist in type ...`), also inside nested `UiItem` / `UiCond` calls:
+`defineUiComponent` passes its target's names down to each `UiSource.prop(...)` written directly in its `items`. In a
+variable, a helper function or a `...` spread a `UiSource.prop(...)` gets no names, so even a correct name fails there
+(`parameter of type 'never'`). Write it directly in `items`, or annotate the helper's return type or the variable with
+the component's names, which `PropertyNameOf<typeof T>` gives: `function attackLabel(): UiItemSpec<PropertyNameOf<typeof
+Hero>> { return UiItem.label("AttackLabel", UiSource.prop("attack")); }`, `const limited: UiConditionSpec<PropertyNameOf<typeof
+Hero>> = UiCond.truthy(...)`, `const extra: readonly UiItemSpec<...>[] = flag ? [...] : []` before `...extra`. A stale name
+then fails on its literal there too. A helper that takes the name as a parameter types it with the same names
+(`name: PropertyNameOf<typeof Hero>`), so a stale argument fails on its literal at the call. A helper generic in the
+name (`<N extends string>(name: N)`) passes it on as the type argument instead, `UiItem.label<N>(className,
+UiSource.prop(name))`, but then a stale name fails on the whole helper call in `items`. In `actionPropertyTransforms`, write the entries as a function of
+`prop` (`actionPropertyTransforms: prop => [...]`) and a `dep.transformCall` argument that reads a property as
+`prop("x")`: the overlay's names reach `prop` only once its `properties` are known. In that form any other mistake in the
+entries, such as a wrong `targetProperty` or `mode`, is reported on `actionPropertyTransforms` itself (the last line of
+the message names the value), as the field is optional, where the array form reports it on the value. Use the function
+form where an argument reads a property. A `{ kind: "domainProperty", propertyName: "x" }` inside
+`dep.transformCall(...)` is still checked, but `tsc` reports it on the `{` of the entry that spreads the call
+(`... arguments: readonly DomainTypeTransformArgumentDef<"x">[] ...' is not assignable to type
+'OverlayActionPropertyTransformDef<...>'`).
+
+Slots that take a property id take the result of `dep.propertyId(...)` as well. A name typed as a plain `string` does
+not compile there, even a correct one: a helper that passes a name on takes it as `<TName extends string>(name: TName)`,
+or, with a UI helper annotated as above, as `name: PropertyNameOf<typeof T>`.
+`tsc` does not check a row value key computed at run time (`{ [key]: value }`), a name given to a handle annotated with
+the general type (`DomainTypeDef`), an inline element's (`inlineElementOf(...)`), the keys of `renamedInheritedProperties`,
+the names `Source.idRef`, a `delegatedActions` parameter override, `UiCond.rowElement` and `UiSource.bandLower` /
+`bandUpper` take, and a published name read from a surface that was not imported as JSON. `dsl build` refuses such a
+name. In `sort`, `compositeKey`, `elementKey`, `localizedProperties`, `targetProperty`, a transform argument, a
+row value key, `UiSource.prop`, a `delegatedActions` parameter override, `Source.direct` / `Source.idRef` and
+`existenceProperty` it reports each place once, in the terms you wrote it (for example
+`actionPropertyTransforms[0] (ConsumeEnergy → consumeActions) argument "value"` or `Source.direct in "name"`), as
+`<where>: "<name>" is not a property of "<Type>" (properties: ...)`.
+
+To rename a property, rename it in `properties`, run `tsc --noEmit`, which lists every place that still uses the old
+name, change each, then build: the ledger message names the id to move ([The id ledger](#the-id-ledger)).
 
 ## Properties
 
@@ -301,7 +349,7 @@ Each modifier returns a new immutable `PropertySpec`:
 | Modifier | Records |
 | --- | --- |
 | `.required()` | The property must have a value. |
-| `.requiredWhen(condition, requiredWhenMet = true)` | Required when `condition` holds (or, with `requiredWhenMet = false`, when it does not). |
+| `.requiredWhen(condition, requiredWhenMet = true)` | Required when `condition` holds. With `requiredWhenMet = false` it is never required, whether `condition` holds or not. |
 | `.optionalWhen(condition)` | Same as `.requiredWhen(condition, false)`. |
 | `.masterData()` | Binding hint `masterData`: a master data resource fills the property. |
 | `.userData()` | Binding hint `userData`: a user data resource fills the property. |
@@ -390,7 +438,10 @@ UiItem.activeToggle("NameToggle", UiCond.truthy(UiSource.prop("displayName"))),
 ### Conditions
 
 `Cond` builds the conditions of `requiredWhen` and `optionalWhen`. `propertyName` names another property of the same
-type.
+type, and a condition is judged on the values of one row. `requiredWhen(condition)` requires a value in every row
+whose values do not rule `condition` out. `optionalWhen(condition)`, which is `requiredWhen(condition, false)`, never
+requires a value. With either, the GS2 Studio master data editor does not accept a value in a row whose values rule
+`condition` out.
 
 | Member | Holds when |
 | --- | --- |
@@ -400,14 +451,34 @@ type.
 | `Cond.and(first, ...rest)`, `Cond.or(first, ...rest)` | All (any) of at least one condition. |
 | `Cond.not(condition)` | `condition` does not hold. |
 
+A `Cond` call returns the condition as plain data, and a dependency's surface publishes a conditional property's
+condition in that form (`propertyDetails.<property>.condition`): `{ "kind": "<member>", "propertyName", "value" }` for
+a comparison (`kind` is the member's name, such as `eq` or `gte`), `{ "kind", "propertyName" }` for `isSet` and
+`isNotSet`, `{ "kind": "and" | "or", "children": [...] }` and `{ "kind": "not", "child" }`. For example
+`Cond.or(Cond.eq("repeatType", "daily"), Cond.eq("repeatType", "weekly"))` is `{ "kind": "or", "children": [{ "kind":
+"eq", "propertyName": "repeatType", "value": "daily" }, { "kind": "eq", "propertyName": "repeatType", "value": "weekly"
+}] }`.
+
 ## Keys and identity
 
 Every type has the reserved property `id`; a row's `id` identifies it within its type. Three settings change how rows
 are identified and ordered.
 
 **Single entry.** `singleEntry: true` declares a type with one row. That row's id must be the type name in lower case
-(`GameSettings` → `gamesettings`); another id fails with `singleEntryInstanceIdMismatch`, whose `expectedId` names the
-id to use. A single-entry type cannot also have a composite key.
+(`GameSettings` → `gamesettings`; for an overlay, the name of the type's first declaration, as below); another id
+fails with `singleEntryInstanceIdMismatch`, whose `expectedId` names the id to use. That holds also for a row or an
+`overlayInstance` of a dependency's single-entry type, except one that a surface from an older GS2 Studio re-exports,
+whose id `dsl build` cannot tell. A single-entry type cannot also have a composite key.
+
+The rule is the same for every single-entry type, of master data or user data, in your package or a dependency: the
+id is the name the type's first declaration gives it, in lower case, and an overlay that renames the type does not
+change it. The same id names the row in the game: the generated `<Type>Handler` of a single-entry type has no row id in
+its Inspector and always holds that row, and it is the `rowId` that `UiSource.rowProp` takes for the type
+([Another type's row](#another-types-row)). A dependency's surface gives the id as
+`types.<Type>.singleEntryRowId`, beside `singleEntry: true`, whether or not a package ships the row: for
+`micro-economy-quest`'s `Progress`, the player's quest progress (user data), it is `"progress"`. A surface written by
+an older GS2 Studio lacks it: write the surface again with `dsl surfaces`, or lower-case the type's key in the surface
+of its `canonicalPackageId`.
 
 ```ts
 const GameSettings = defineDomainType("GameSettings", {
@@ -477,8 +548,8 @@ const Rarity = defineDomainType("Rarity", {
 | Target | Value keys |
 | --- | --- |
 | `LocalDomainTypeDef` | Property names of the definition (checked against declared names by `tsc`). `tsc` asks for every `.required()` property except `.userData()` ones, whose values a user data resource fills per player. |
-| `OverlayDomainTypeDef` | Declared property names of the overlay, published names of its source type, or property ids. |
-| `DependencyDomainTypeRef` (`dep.type("T")`) | Property names the dependency publishes for the type, or property ids. |
+| `OverlayDomainTypeDef` | Declared property names of the overlay, published names of its source type, or property ids (checked by `tsc`, which asks for every `.required()` property the overlay adds). |
+| `DependencyDomainTypeRef` (`dep.type("T")`) | Property names the dependency publishes for the type, or property ids (checked by `tsc`). |
 
 Values are JSON: `string`, `number`, `boolean`, `null`, arrays and objects. A `ref` value is the target row's id; a
 list value is an array; an inline element list is an array of objects keyed by the element's property names. A key that
@@ -513,7 +584,7 @@ dependency type (`dep.type("T")`) or an `OverlayDomainTypeDef`. An overlay row a
 An overlay type extends a dependency's type: rows of the overlay are rows of the dependency's type, and the overlay adds
 properties and settings. Make one with `defineOverlayDomainType(name, options, spec?)` and include it in
 `definePackage({ domainTypes: [...] })`; `options` usually comes from `dep.overlay("TypeName")`, which supplies the
-source, `singleEntry` and the published properties, inline schemas and delegated actions.
+source, `singleEntry` (with `singleEntryRowId`) and the published properties, inline schemas and delegated actions.
 
 ```ts
 const Item = defineOverlayDomainType("Item", inventory.overlay("Item"), {
@@ -535,16 +606,16 @@ Inherited properties are addressed by the names the dependency publishes, for ex
 | --- | --- |
 | `properties?` | `{ [propertyName]: PT.<kind>()... }` added by this overlay. |
 | `localizedDisplay?` | The overlay type's `LocalizedDisplay` label and description per locale. |
-| `localizedProperties?` | Display metadata for added properties. |
+| `localizedProperties?` | Display metadata for added properties and `id`. An inherited property keeps its source's; a key naming one fails. |
 | `sort?` | `{ key: propertyName \| null, direction?: "asc" \| "desc" }`. Without it, the overlay keeps the dependency's order, as does the overlay that `defineUiComponent`, `delegatedActions`, `UiCond.rowElement` and `UiSource.rowProp` create for a dependency type (`types.<Type>.sort` of the surface). It replaces that order; `{ key: null }` with `"asc"` is the same as no `sort`. |
 | `compositeKey?` | `{ kind: "inherit" }`, `{ kind: "suppress" }`, or `{ kind: "override", members: [...names] }`. |
-| `actionPropertyTransforms?` | Transform calls attached to an action property of the type: `{ targetProperty, mode?: "replace" \| "append", transform, arguments }` for a transform of this package (its `ActionTransformDef` or `() => transform`), or `{ targetProperty, mode?, transformPackageId, transformId, arguments }` for a dependency's. `mode` defaults to `"replace"`; `"append"` lets several packages add to the same action. `arguments` is `{ parameterName, source }[]`, where `source` is `{ kind: "static", value }`, `{ kind: "domainProperty", propertyName }`, `{ kind: "actionLiteral", value }`, `{ kind: "placeholder", value }` or a nested `{ kind: "actionTransformRef", invocation }`. For a dependency's transform, write `{ targetProperty, mode, ...dep.transformCall(name, { <parameter>: source }) }`. `dsl build` refuses a top-level argument the transform does not declare, one named twice, and a missing required one. |
+| `actionPropertyTransforms?` | Transform calls attached to an action property of the type: `{ targetProperty, mode?: "replace" \| "append", transform, arguments }` for a transform of this package (its `ActionTransformDef` or `() => transform`), or `{ targetProperty, mode?, transformPackageId, transformId, arguments }` for a dependency's. `mode` defaults to `"replace"`; `"append"` lets several packages add to the same action. `arguments` is `{ parameterName, source }[]`, where `source` is `{ kind: "static", value }`, `{ kind: "domainProperty", propertyName }`, `{ kind: "actionLiteral", value }`, `{ kind: "placeholder", value }` or a nested `{ kind: "actionTransformRef", invocation }`. For a dependency's transform, write `{ targetProperty, mode, ...dep.transformCall(name, { <parameter>: source }) }`. The field also takes a function of `prop` that returns the entries (`prop => [...]`); `prop("x")` is `{ kind: "domainProperty", propertyName: "x" }`, and `tsc` reports a wrong `"x"` on that literal ([Property names are type-checked](#property-names-are-type-checked)). `dsl build` refuses a top-level argument the transform does not declare, one named twice, and a missing required one. |
 | `delegatedActions?` | `{ [methodName]: DelegatedActionDef }`, as [delegated actions](#delegated-actions). |
 | `renamedInheritedProperties?` | `Record<string, string>`; not covered by this reference. |
 
-Names in `sort`, `compositeKey` and `targetProperty` resolve against the overlay's own properties and the published
-ones; a name that resolves to neither fails with `unresolvedPropertySlot`. Two overlays of the same source type fail
-with `duplicateOverlaySource`.
+Names in `sort`, `compositeKey`, `targetProperty` and a transform argument's `propertyName` resolve against the
+overlay's own properties and the published ones; `tsc` refuses a name that resolves to neither, and so does `dsl build`
+(`unresolvedPropertySlot`). Two overlays of the same source type fail with `duplicateOverlaySource`.
 
 `example-gift-sale` overlays `example-gift-shop`'s `GiftBox`, whose published `cost` is a `list<consumeAction>`. It adds
 a `price` and appends `example-inventory`'s `ConsumeItem` to `cost`, so every box costs `price` coins. Each row of the type
@@ -583,13 +654,13 @@ const GiftBox = defineOverlayDomainType("GiftBox", giftShop.overlay("GiftBox"), 
   },
   // Every generated list of gift boxes shows the cheapest box first.
   sort: { key: "price", direction: "asc" },
-  actionPropertyTransforms: [
+  actionPropertyTransforms: prop => [
     {
       targetProperty: "cost",
       mode: "append",
       ...inventory.transformCall("ConsumeItem", {
         itemName: { kind: "static", value: "coin" },
-        count: { kind: "domainProperty", propertyName: "price" },
+        count: prop("price"),
       }),
     },
   ],
@@ -640,7 +711,7 @@ export const exampleGiftSale = definePackage({
 | Source | Argument value |
 | --- | --- |
 | `{ kind: "static", value }` | A fixed JSON value. A `ref<T>` parameter takes a row id of `T`. |
-| `{ kind: "domainProperty", propertyName }` | The value of the row's property `propertyName`: an added or a published property of the overlay. |
+| `prop("<propertyName>")`, or `{ kind: "domainProperty", propertyName }` | The value of the row's property `propertyName`: an added or a published property of the overlay. `prop` is the parameter of `actionPropertyTransforms: prop => [...]`. |
 | `{ kind: "placeholder", value }` | `value` passed through unchanged, for example `#{slot}`. |
 | `{ kind: "actionLiteral", value }`, `{ kind: "actionTransformRef", ... }` | Signature only; not covered by this reference. |
 
@@ -1052,6 +1123,15 @@ becomes one generated Unity component that reads the row of its handler ([Rows i
 `OnUpdate` to the element in the Inspector, and fill the target lists of `gauge`, `image`, `activeToggle` and
 `interactable`.
 
+Each generated component except `buttonAction` listens to its handler only while it is enabled, as its GameObject is
+active: it subscribes when it is enabled, applying the row the handler holds, and unsubscribes when it is disabled.
+An `activeToggle` that deactivates its own GameObject, or an ancestor of it, therefore stops listening and never
+activates it again. Put an `activeToggle` on a GameObject that stays active, such as the parent of the GameObjects it
+shows and hides or one of their siblings, and list those GameObjects in `_activeWhenTrue` and `_activeWhenFalse`; never
+put it on a GameObject it hides. That GameObject must still be below the type's handler, which the component looks for
+in its own GameObject and its ancestors. A component that another component hides is not affected: it reads the current
+row again when it is shown. `interactable` changes only `interactable`, so it can sit on the `Button` it controls.
+
 | Item | Arguments | The generated component |
 | --- | --- | --- |
 | `UiItem.label(className, source, options?)` | `source`: `UiSource.prop(...)` or `UiSource.lit(...)`. `options.fallbackText`: the text sent while the property has no value. | Sends the value as text through `OnUpdate` (`UnityEvent<string>`). A `timestamp` is written `yyyy-MM-dd HH:mm`; other values are converted with `Convert.ToString`, so a list or inline element property does not show its contents. A `PT.localizedString` source sends the translation for the player's locale and sends again when the locale changes ([Localized text](#localized-text)); of the other items only `templateLabel` and the `UiCond` of `activeToggle` and `interactable` accept that source. |
@@ -1060,7 +1140,7 @@ becomes one generated Unity component that reads the row of its handler ([Rows i
 | `UiItem.image(className, source, imageMode, options?)` | `imageMode`: `"spriteResourcePath"`, `"addressableKey"`, `"url"` or `"assetReference"`. `options.fallback`: the reference used while the property has no value. | Calls `partial void ApplyImage(Image target, string reference)`, which the game implements in its own part of the class to load the image; `ImageMode` names the mode. The generated code loads nothing. |
 | `UiItem.gauge(className, current, max, options?)` | Numeric sources. `options.min` accepts the same sources as `max` and defaults to 0; `options.clamp` (default `true`) keeps the fill between 0 and 1. | Sets `fillAmount` of its target `Image` to `(current - min) / (max - min)`, or 0 when that range is not positive. A non-numeric source leaves the item out with a warning. |
 | `UiItem.buttonAction(className, methodName, args?, options?)` | `methodName`: a delegated action of the target. `args` binds by name the parameters the action's generated method takes from its caller (for a dependency's action, its surface's `parameters`; see [Dependencies](#dependencies)); the sources are read when the button is clicked. | Calls the method for the row when its `Button` is clicked and ignores clicks while a call runs; then raises `OnCompleted`, or `OnFailed` on a GS2 error. It never disables the button: add an `interactable` item for that. |
-| `UiItem.activeToggle(className, condition, options?)` | A `UiCond` condition. | Activates the GameObjects in `_activeWhenTrue` and deactivates those in `_activeWhenFalse` while the condition holds, and the reverse while it does not. List siblings or children, never the component's own GameObject. |
+| `UiItem.activeToggle(className, condition, options?)` | A `UiCond` condition. | Activates the GameObjects in `_activeWhenTrue` and deactivates those in `_activeWhenFalse` while the condition holds, and the reverse while it does not. List siblings or children, never the component's own GameObject or an ancestor of it (see above). |
 | `UiItem.interactable(className, condition, options?)` | A `UiCond` condition. | Sets `interactable` of the `Selectable`s (such as a `Button`) in `_interactableWhenTrue` to the condition and of those in `_interactableWhenFalse` to its negation. |
 
 Choose `label` for a value shown as text as it is, `templateLabel` for text with words around values, and `value` for a
@@ -1103,9 +1183,15 @@ defineUiComponent(Item, {
 ### Another type's row
 
 `UiSource.rowProp(type, rowId, propertyName)` lets a condition read one row of another type, such as the player's stamina in
-`Energy` row `"stamina"` while the component targets a quest. `rowId` is the row's id; the property must be a number or a
-`bool`. `type` may be the component's own target type, to compare with another of its rows. When `type` is a dependency's type, the package hosts it on a local overlay (one `type:<Type>` ledger token; build
-once with `--write-ledger`).
+`Energy` row `"stamina"` while the component targets a quest. `rowId` is the row's id; for a single-entry type, the
+type name in lower case, even when nobody authors the row ([Keys and identity](#keys-and-identity); `"progress"` for
+`micro-economy-quest`'s `Progress`). For a single-entry type, `dsl build` refuses another id
+(`uiComponentForeignRowSingleEntryIdMismatch`, whose `expectedId` names the id), as the type's handler can hold no
+other row; it does so whenever it knows the id, which it does except for a dependency's type that a surface from an
+older GS2 Studio re-exports. For another type it checks only that `rowId` is a valid row id, not that such a row exists.
+The property must be a number or a `bool`. `type` may be the component's own target type, to compare with another of
+its rows. When `type` is a dependency's type, the package hosts it on a local overlay (one `type:<Type>` ledger token;
+build once with `--write-ledger`).
 
 ```ts
 // Disables the box's Open button while the player owns fewer coins than the box costs. The coin row of
@@ -1139,7 +1225,16 @@ item's name is the target type's name. Leave both out unless the editor's reader
 
 The class name is what the generated code uses: the item becomes the C# class `<Type><className>` (`QuestStartButton`
 for `buttonAction("StartButton", ...)` on `Quest`) in the namespace of the type's handler followed by `.UI`, listed in
-Unity's Add Component menu under `GS2 Studio/DomainType/<Type>/<Kind>/<className>`.
+Unity's Add Component menu under `GS2 Studio/DomainType/<Type>/<Kind>/<className>`. A surface lists a type's items by
+`className` alone (`types.Quest.uiComponents.StartButton`), so prefix `<Type>` to find the class in Unity.
+
+`<Type>` is the type's generated name, the one its `<Type>Handler` has (see `types.<Type>.generatedHandlers` of a
+surface): the type's name or, when an overlay in any package of the project renames the type, the overlay's name
+(that of the overlay furthest from the type's declaration, when overlays that build on each other rename it). That
+rename changes the classes of every item on the type, a dependency's included, also when the surface you read was
+written before it: if your package renames `Quest` to `Mission`, `QuestStartButton` becomes `MissionStartButton`.
+An item on the elements of an inline element list (`inlineElementOf(Host, "listProp")`) puts the list property's name
+in PascalCase between them: `<Host><ListProp><className>`; a nested list puts the name of each list on the path.
 
 ```ts
 uiComponents: [
@@ -1177,7 +1272,7 @@ component and no `UiSource.rowProp`, unless your package mounts its overlay of t
 
 | Generated class | Holds |
 | --- | --- |
-| `<Type>Handler` | One row: the row whose id is set in its Inspector, with the scope ids the GS2 model needs (such as the quest group of a quest). |
+| `<Type>Handler` | One row: the row whose id is set in its Inspector, with the scope ids the GS2 model needs (such as the quest group of a quest). A single-entry type's handler has no row id to set: it holds the type's one row, whose id is the type name in lower case ([Keys and identity](#keys-and-identity)). |
 | `<Type>ListHandler` | Every row GS2 returns for the scope set in its Inspector. For each row it instantiates `_itemPrefab`, a prefab with a `<Type>ListItemHandler` at its root and the item components below it, under `_contentParent`, and it adds and removes instances as rows come and go. When the type has both a master data and a user data model that can be listed, `_axis` picks one; it must be set, or the list loads nothing. Written only for a type that is not single entry and whose rows a GS2 master data or user data model lists. |
 | `<Type>ListBy<Property>Handler` | The same, for the rows whose `ref` property `<Property>` names the row of the nearest handler of the referenced type above it (for example the quests of one quest group). |
 
@@ -1188,8 +1283,24 @@ A dependency's own UI components are generated with it, so a dependency used as 
 the dependency and what its surface asks for. `foundation-economy-currency` is an example: the transforms that deposit
 into a wallet (`DepositFreeCurrency`, `DepositCurrency`) are all the DSL needs, and no `Wallet` row is needed. The game
 shows a balance with the package's `Wallet` items (`FreeBalanceLabel`, `PaidBalanceLabel`, `TotalBalanceLabel`, listed
-under `types.Wallet.uiComponents`) below a `WalletHandler` whose row id is the wallet slot as a decimal string (`"0"`
-for slot 0, the `slot` the transforms take).
+under `types.Wallet.uiComponents`; classes `WalletFreeBalanceLabel` and so on) below a `WalletHandler` whose row id
+is the wallet slot as a decimal string (`"0"` for slot 0, the `slot` the transforms take).
+
+`micro-economy-quest` is another: its `Quest` item `StartButton` (class `QuestStartButton`, which calls `Start`) works
+below a quest list's item handler or a `QuestHandler`, and its `Progress` items `CompleteButton`, `IdleActiveToggle` and
+`RunningActiveToggle` (classes `ProgressCompleteButton`, `ProgressIdleActiveToggle`, `ProgressRunningActiveToggle`)
+work below a `ProgressHandler`. `Progress` is single entry, as a player has at most one quest in progress, so the
+`ProgressHandler` has no row id to set and holds the row `"progress"`. GS2 refuses every `Start` while a quest is in
+progress (`quest.progress.progress.error.alreadyExists`), so gate the quest list's Start buttons with
+`ProgressIdleActiveToggle`: list the GameObject that holds them (the list's content parent, or a panel around the list)
+in its `_activeWhenTrue` and put the toggle on a GameObject that stays active, such as that panel's parent, never on the
+panel itself (see [UI components](#ui-components)). Or put one in the list's item prefab with that row's
+`QuestStartButton` in `_activeWhenTrue`, where it reads the `ProgressHandler` above the list. To disable Start instead
+of hiding it, add an `interactable` on `Quest` whose condition includes
+`UiCond.not(UiCond.truthy(UiSource.rowProp(quest.type("Progress"), "progress", "inProgress")))` (see
+[Another type's row](#another-types-row)). Put what shows the quest in progress, with its `ProgressCompleteButton`, in
+the `_activeWhenTrue` of `ProgressRunningActiveToggle`, and put that toggle on a GameObject that stays active too, such
+as the parent of what it shows.
 
 Every list of a type is in the order of the type's sort setting (`sort` on a local type in
 [Keys and identity](#keys-and-identity), or on an overlay in [Overlay types](#overlay-types)). Rows whose keys are
@@ -1209,6 +1320,9 @@ sort: { key: "price", direction: "asc" },
 At run time, setting `Comparer` on a list handler replaces the order, and `null` restores the generated one. A list sorts
 each time it reloads its rows from GS2; when a sort key changes without a reload (a value of the player's data, for
 example), call `Resort()`.
+
+The game signs in to GS2 with the ApplicationAccess client of the project's `Default` GS2-Deploy stack;
+[LLM.md](LLM.md#8-the-games-gs2-client-credentials) says where to get it and where it goes in Unity.
 
 ## Code templates
 
@@ -1285,11 +1399,11 @@ included. A `file:` path is relative to the declaring package's directory, so re
 `<project>/packages/<your packageId>/` when the two directories are not at the same depth:
 
 - A package that came into the project as a dependency of another one, rather than being added itself, is declared in
-  no `package.json` of `<project>/packages/`. Its entry in `<project>/project-lock.json` names its source: for
-  `"sourceKind": "github"`, the spec is `github:<owner>/<repo>` with that entry's `owner` and `repo`; for `"sourceKind":
-  "npm"`, `npm:<packageName>@<range>`. `dsl build`
-  accepts any spec of the same repository, and when a spec names another source it prints the spec the packages that
-  brought the dependency in declare.
+  no `package.json` of `<project>/packages/`. Derive its spec from its entry in `<project>/project-lock.json`: for
+  `"sourceKind": "github"`, `github:<owner>/<repo>` with that entry's `owner` and `repo`; for `"sourceKind": "npm"`,
+  `npm:<packageName>@<range>` with its `packageName` and a range that admits its `version` (the `version` itself does).
+  `dsl build` accepts any spec of the same repository or npm package, and when a spec names another source it prints
+  the spec the packages that brought the dependency in declare.
 - A GitHub spec names the repository only, also for a package in a subdirectory of it: `github:<owner>/<repo>/<dir>`
   is refused. The project's `project-lock.json` records the directory (`subdirectory` of the package's entry, beside
   `owner` and `repo`). Every package of the GS2 Studio package repository is `github:gs2io/gs2-studio-package`.
@@ -1311,7 +1425,7 @@ included. A `file:` path is relative to the declaring package's directory, so re
 | `inlineElements(typeName, listPropertyName, elements)` | Inline element values keyed by property ids, which a dependency type's row needs. |
 | `delegatedActionTarget(typeName, methodName)` | The published target of a delegated action. |
 | `transformId(name)` | A published action transform id, for `Arg.actionTransformRef` or `ActionProgram.transform`. |
-| `transformCall(name, args)` | `{ transformPackageId, transformId, arguments }` of an `actionPropertyTransforms` entry, from arguments keyed by parameter name. |
+| `transformCall(name, args)` | `{ transformPackageId, transformId, transformName, arguments }` of an `actionPropertyTransforms` entry, from arguments keyed by parameter name; `transformName` names the entry in build errors. |
 | `transformProgram(name, args)` | The action program that calls the transform, from arguments keyed by parameter name. |
 | `resourceId("<service>.<Model>")` | A published master data resource id, for external resource links and action transform outputs. |
 
@@ -1324,12 +1438,14 @@ Besides names and ids, the surface describes what a dependent needs to use them:
 
 | Key | Describes |
 | --- | --- |
-| `types.<Type>.propertyDetails.<property>` | `type` (`int32`, `string`, `localizedString`, `enum<a\|b>`, `ref<Item>`, `inline<Item>`, `list<...>`, `consumeAction` and the other action kinds; `list<inlineElement>` for an inline element list, whose schema is under `inlineSchemas`; another package's type as `<packageId>:<Type>`), `requirement` (`always`, `never` or `conditional`), `bindingHint` (`none`, `masterData`, `userData` or `assetDelivery`) and `display` (label and description per locale; absent when the property has none). |
+| `types.<Type>.propertyDetails.<property>` | `type` (`int32`, `string`, `localizedString`, `enum<a\|b>`, `ref<Item>`, `inline<Item>`, `list<...>`, `consumeAction` and the other action kinds; `list<inlineElement>` for an inline element list, whose schema is under `inlineSchemas`; another package's type as `<packageId>:<Type>`), `requirement` (`always`, `never` or `conditional`), for a `conditional` one `condition` and `requiredWhenMet` as `.requiredWhen(condition, requiredWhenMet)` takes them (`condition` names properties of the same type; see [Conditions](#conditions) for its form), `bindingHint` (`none`, `masterData`, `userData` or `assetDelivery`) and `display` (label and description per locale; absent when the property has none). |
 | `types.<Type>.delegatedActions.<Method>` | `targetResource`, `targetActionKey` and `parameters`: the parameters the generated method takes from its caller, which a button's `args` gives, by name with `type` (the GS2 catalog's spelling, such as `[]transaction::Config`) and `required`. The method fills every other parameter of the action itself: the namespace, the access token, the keys of the row, and those the delegated action's `parameterOverrides` set. Give `args` every `required: true` parameter; when none is, `args` may be `undefined`. A button binds only a parameter of a scalar type (a string, number or bool); one of another type, such as `config`, keeps its default. `Gs2Exchange:RateModel.Exchange` and `Gs2Showcase:DisplayItem.Buy` also take a required `storeProductId` string, which `parameters` does not list, when a master data resource of the packages that make up the type has `Gs2Money2:VerifyReceiptByUserId` (a paid product) among its actions, written directly, in a static binding, or produced by an action transform it uses. `parameters` is absent when the action does not resolve (an action the catalog lacks, or a target resource that does not mount the type) or code generation blocks it, for the delegated actions of inline schemas (`inlineSchemas.<list>.delegatedActions`), and from older surfaces: then the surface does not say what the method takes. |
+| `types.<Type>.singleEntry` | `true` when the type has one row (see [Keys and identity](#keys-and-identity)). |
+| `types.<Type>.singleEntryRowId` | The id of that one row, for a single-entry type: the name of the type's first declaration in lower case, also when an overlay renames the type. It is the id of a row you author of the type and the `rowId` to pass to `UiSource.rowProp`. Absent for other types, and from older surfaces. |
 | `types.<Type>.sort` | The order of the type's rows, `{ key, direction }` as an overlay's `sort` takes it (`key` is `null` for the id); absent when the rows are in ascending id order, and from older surfaces. |
 | `types.<Type>.shippedRowIds` | The ids of the rows this package ships of the type, sorted; `[]` when it ships none. Each package lists only its own rows: the rows of a type are those of every surface entry with the same `canonicalPackageId` and `canonicalTypeId`, plus those every surface lists under `shippedRowsOfDependencyTypes."<canonicalPackageId>:<canonicalTypeId>"`. These rows are provided, so do not author them: a row you author with a listed id replaces the shipped row and all its values (change some values with `overlayInstance` instead). Rows with other ids are added beside them, except on a single-entry type, whose one row is the shipped one. A row an `overlayInstance` suppresses is still listed. When no surface lists a row and a build names the type in `No master data is registered for domain model "<Type>"`, the rows are yours to author. |
-| `types.<Type>.uiComponents.<ClassName>` | The UI items on the type, the package's own and those of the packages it overlays (`{}` for none), by class name: `kind` (`label`, `buttonAction`, ...), `name`, the declaring `packageId` and, for a button, the delegated action `method` it calls. An inline schema lists its items under `inlineSchemas.<list>.uiComponents`. Code generation gives the items of an overlay, renamed or not, the same generated classes as the type's, so an item you add with a listed class name replaces the listed item (`dsl build` warns about it). Reuse a listed item instead of adding one that shows the same. |
-| `types.<Type>.generatedHandlers` | The classes Unity code generation writes for the rows of the type, judged on the package and its dependencies: `<Type>Handler`, and for a type whose rows a GS2 model lists, `<Type>ListHandler`, `<Type>ListItemHandler` and one `<Type>ListBy<Ref>Handler` per reference it can list by (see [Rows in the game](#rows-in-the-game)). `<Type>` is the type's one generated name, which an overlay keeps. `[]` when it writes none: a UI component on the type, or a `UiSource.rowProp` of it, then fails `dsl build` unless your package mounts its overlay of the type with a resource of its own. The element Handlers of an inline schema are not listed. Absent when code generation refuses the type. |
+| `types.<Type>.uiComponents.<className>` | The UI items on the type, the package's own and those of the packages it overlays (`{}` for none), by the class name the item was declared with, not the generated class: key `StartButton` on `Quest` is the generated class `QuestStartButton` (`<Type><className>`; see [Item options](#item-options)). Each gives `kind` (`label`, `buttonAction`, ...), `name` (the item's label in GS2 Studio's editor, which is not part of any class name), the declaring `packageId` and, for a button, the delegated action `method` it calls. An inline schema lists its items under `inlineSchemas.<list>.uiComponents`. Code generation gives the items of an overlay, renamed or not, the same generated classes as the type's, so an item you add with a listed class name replaces the listed item (`dsl build` warns about it). Reuse a listed item instead of adding one that shows the same. |
+| `types.<Type>.generatedHandlers` | The classes Unity code generation writes for the rows of the type, judged on the package and its dependencies: `<Type>Handler`, and for a type whose rows a GS2 model lists, `<Type>ListHandler`, `<Type>ListItemHandler` and one `<Type>ListBy<Ref>Handler` per reference it can list by (see [Rows in the game](#rows-in-the-game)). `<Type>` is the type's one generated name, which also starts the class of each of its UI items; an overlay keeps it unless it renames the type ([Item options](#item-options)). `[]` when it writes none: a UI component on the type, or a `UiSource.rowProp` of it, then fails `dsl build` unless your package mounts its overlay of the type with a resource of its own. The element Handlers of an inline schema are not listed. Absent when code generation refuses the type. |
 | `types.<Type>.mountedBy` | `masterData` and `userData`: the GS2 models (`<service>.<Model>`) of this package's own resources mounted on the type, sorted. A type mounted only by a namespace, such as `CurrencyStore` (`money2.Namespace`), gets no Handler. Other packages that overlay the type list their resources in their own surfaces. |
 | `shippedRowsOfDependencyTypes` | The ids of the rows this package ships of a dependency's type it does not declare (`instance(dep.type("<Type>"), ...)`), keyed `<canonicalPackageId>:<canonicalTypeId>` of the type, as its surface entries publish them. |
 | `actionTransformSignatures.<Name>` | `category` (`acquire`, `consume` or `verify`) and `parameters`: per parameter in declaration order, `type`, `required` and, only when the parameter gives one, `description` (one text, not per locale). A `ref<T>` parameter takes a row id of `T`. |
@@ -1451,6 +1567,30 @@ throw. Write it again with `dsl surfaces`.
 }
 ```
 
+### A row of another package's type
+
+A surface type `ref<<packageId>:<Type>>` (in `propertyDetails` or `actionTransformSignatures`) takes the id of a row of
+a type that package `<packageId>` declares, which need not be the package whose surface you read. To give it a value:
+
+1. Declare `<packageId>` as a dependency of yours if it is not one already: import its surface file, pass it to
+   `dependencyPackage`, and add it to `dependencies` with its spec (one that came in as a dependency of another package
+   takes the spec its `project-lock.json` entry gives, as above).
+2. Author the row with `instance(other.type("<Type>"), id, values)`, with the values its `propertyDetails` ask for.
+3. Give that row id as the `ref` value.
+
+A limited-time quest is an example. `micro-economy-quest` keeps the period on the quest collection, not on `Quest`:
+`QuestCollection.schedule` is `ref<foundation-economy-schedule:Schedule>`, GS2's challenge period of the quest group,
+which holds for every quest in the collection. To limit one quest, give it a collection of its own: declare
+`foundation-economy-schedule` (`github:gs2io/gs2-studio-package` for the official package), author
+`instance(schedule.type("Schedule"), "winter_event", { scheduleType: "absolute", repeatType: "always", startAt:
+"2026-11-30T15:00:00Z", endAt: "2026-12-31T14:59:59Z" })` (1 to 31 December 2026 in Japan; timestamps are UTC, see
+[Property types](#property-types)) and `instance(quest.type("QuestCollection"), "winter_event", { schedule:
+"winter_event" })`, and give the quest's row `collection: "winter_event"`.
+
+A game lists quests by collection (a `QuestListByCollectionHandler` below the `QuestCollectionHandler` of one
+collection; see [Rows in the game](#rows-in-the-game)), so a scene that lists the other collection does not show this
+quest: the game must list the new collection as well.
+
 ## The id ledger
 
 `dsl build` reads `id-ledger.json` next to the entry (or `--ledger <path>`) and accepts it only in the canonical form it
@@ -1508,10 +1648,12 @@ Rules:
   <new> is missing, which looks like a rename: ... move its id "<id>" from "<old>" to "<new>"`. Otherwise, as for two
   properties of one type renamed at once, it reports `random token <old> is not current; ...` and `random token <new> is
   missing from the ledger` apart. To keep the identity, move the old token's id to the new token in `random` and keep the
-  entries sorted. Move every id the build lists before building again: once `type:<old>` is moved, its properties and
-  rows no longer pair. A pair that is really a removal and an unrelated addition, such as deleting one row and adding
-  another, is reported the same way; do what the line's last sentence says for it. While the old token is still in `random`,
-  `--write-ledger` fails with the same "not current" problem and writes nothing; it would record a new id for the new
+  entries sorted: the new token goes where it sorts, not where the old one was, or the build fails with
+  `CLI_DSL_LEDGER_INVALID ... ledger JSON is not canonical`. Move every id the build lists before building again: once
+  `type:<old>` is moved, its properties and rows no longer pair. A pair that is really a removal and an unrelated addition, such as deleting one row and adding
+  another, is reported the same way; as the line's last sentence says, move the old token and its id to `retired`
+  instead, then build with `--write-ledger`, which records a new id for the new token. While the old token is still in
+  `random`, `--write-ledger` fails with the same "not current" problem and writes nothing; it would record a new id for the new
   token only after the old one is moved to `retired`, which ends the old identity. Renaming a type renames the tokens
   of its properties and rows too (`type:Item` and `property:Item.count` become `type:Article` and
   `property:Article.count`); move each of them.
@@ -1535,6 +1677,14 @@ Rules:
   its parent's token instead of `user`. For example, renaming `Item` to `Article` in `example-inventory`, with its user
   data resource mounted on the type, needs `ui:Article:definition`, `ui:Article:item:StockLabel`,
   `ui:Article:item:CountValue`, `ui:Article:item:OwnedInteractable` and `user/inventory:SimpleItem:Article:#0`.
+- Renaming a UI item changes its token (`ui:<Type>:item:<ClassName>`) and so its id, and its generated Unity script is
+  renamed too. To keep the scenes and prefabs that use the script wired, add the new token with the item's old id to
+  `deterministicOverrides`: updating the Unity project (`codegen unity`, or the editor's update) then gives the renamed
+  script the GUID of the old one, once the project has been updated by a GS2 Studio that records UI item ids. Without
+  the override, the old script is removed and the update names the scenes and prefabs that still use it.
+- Renaming a property changes no UI item: an item's token is its class name, not the property it shows, so `HpLabel`
+  keeps its id (and its script) after `hp` becomes `health`. Rename the item as well
+  only when asked, with the override above.
 
 ## Building with dsl build
 
@@ -1573,7 +1723,7 @@ generation): no errors or warnings` as its last line on stdout (`--json`: `diagn
 
 | Line | Fix |
 | --- | --- |
-| `[warning] <dependency> / <Type>::id: ... No master data is registered for domain model "<Type>", so <resource> resource cannot be expanded.` | The dependency's GS2 resource needs rows of `<Type>` from the project. Add them with `instance(dep.type("<Type>"), id, values)`, with a value for each property `types.<Type>.propertyDetails` of the surface lists as `requirement: "always"`, except `id` (the row id), `userData` properties and action lists. The line's remedy names that call and that surface key with the type's name; it keeps `<Type>` when the warning names an inline schema or an unresolved type rather than a type `dep.type()` takes. An inline schema's rows are elements of the host type's list property (`dep.inlineElements(...)`). |
+| `[warning] <dependency> / <Type>::id: ... No master data is registered for domain model "<Type>", so <resource> resource cannot be expanded.` | The dependency's GS2 resource needs rows of `<Type>` from the project. Add them with `instance(dep.type("<Type>"), id, values)`, with a value for each property `types.<Type>.propertyDetails` of the surface lists as `requirement: "always"`, except `id` (the row id), `userData` properties and action lists, and for each `conditional` one with `requiredWhenMet: true` unless the row's values rule out its `condition`. The line's remedy names that call and that surface key with the type's name; it keeps `<Type>` when the warning names an inline schema or an unresolved type rather than a type `dep.type()` takes. An inline schema's rows are elements of the host type's list property (`dep.inlineElements(...)`). |
 | `... is a dependency the DSL cannot change, so these are fixed through the dependency that brings it in: ...` | A defect of the dependency itself. Remove the dependency the message names from the DSL when the package does not need it; the update or removal the message leaves to the project's owner is made in GS2 Studio. |
 | `[error] ... the required arguments (...) of action transform "..." have no value for row "..."` | A transform argument reads a property the row has no value for. Give every row the value, also the dependency's rows (`overlayInstance`). |
 | A line about another package that this DSL does not change | Leave it; tell the user about it instead of building again. |
@@ -1583,9 +1733,10 @@ These lines do not include what Unity code generation alone refuses; open the pr
 
 ## Validation error kinds
 
-`CLI_DSL_PACKAGE_INVALID` prints each problem as a JSON object (a `restoreFailure` as its plain message); its `kind` is
-one of these. The other fields name the
-type, property, resource or component involved.
+`CLI_DSL_PACKAGE_INVALID` prints each problem as a JSON object; its `kind` is one of these. The other fields name the
+type, property, resource or component involved. A `restoreFailure` is printed as its plain message, and a property name
+that resolves to nothing (`unresolvedPropertySlot`, `uiComponentUnknownProperty`) as
+`<where>: "<name>" is not a property of "<Type>" (properties: ...)`.
 
 | Kind | Cause |
 | --- | --- |
@@ -1600,13 +1751,13 @@ type, property, resource or component involved.
 | `invalidInstanceType` | A row of a type the package does not declare. |
 | `invalidInstanceDomainTypeKind` | An `overlayInstance` of a local type. |
 | `instanceIdTooLong` | A row id longer than `maximumLength` (128), the longest name GS2 accepts. |
-| `invalidSingleEntryName`, `singleEntryInstanceIdMismatch` | A single-entry type name that gives no valid row id, or a row whose id is not `expectedId`. |
+| `invalidSingleEntryName`, `singleEntryInstanceIdMismatch` | A single-entry type name that gives no valid row id, or a row or overlay row of a single-entry type, yours or a dependency's, whose id is not `expectedId`. |
 | `invalidCompositeKey` | A composite key member that is missing, `id`, repeated, of an unsupported type or hint, or combined with `singleEntry` (`reason`). |
 | `invalidSortKey` | A sort key that is unknown, not comparable, or not required (`reason`). |
 | `invalidInlineBindingHint` | A binding hint an inline property does not accept. |
 | `invalidLocalizedStringBindingHint` | A `PT.localizedString` property without `.assetDelivery()`. |
 | `invalidDelegatedActionResourceRef` | A delegated action targeting a resource that is not the package's. |
-| `unresolvedPropertySlot`, `inlineValueKeyNotPublished` | A property name that resolves to nothing; an inline value key of a type this package does not declare, which must be a property id (use `dep.inlineElements(...)`). |
+| `unresolvedPropertySlot`, `inlineValueKeyNotPublished` | A property name that resolves to nothing, for example one left behind by a rename; an inline value key of a type this package does not declare, which must be a property id (use `dep.inlineElements(...)`). The build lists each place once and skips the read-back (`restoreFailure`) of that build, which would repeat them. |
 | `invalidMountPath`, `invalidMountPathFormat` | A resource mounted on an unknown type, or on a name that is not PascalCase. |
 | `invalidParentRef`, `cyclicParentRef`, `duplicateArrayElementIndex` | A broken resource tree. |
 | `arrayElementLocationMismatch`, `arrayElementParentPropertyUnresolved`, `invalidArrayPropertyName` | An `arrayChildren` entry whose model is not the array field's element model, whose field holds no model, or whose field name is invalid. |
@@ -1625,7 +1776,7 @@ type, property, resource or component involved.
 | `uiComponentButtonActionParameterInvalidFormat` | A `buttonAction` argument name that is not a valid parameter name. |
 | `uiComponentTableBandSourceTypeUnknown`, `uiComponentTableBandTableUnknown`, `uiComponentTableBandSourceNotSingleEntry` | A band source on an unknown type or property, or on a type that is not single entry. |
 | `uiComponentRowElementSourceTypeUnknown`, `uiComponentRowElementListUnknown`, `uiComponentRowElementListNotBoolList` | A `UiCond.rowElement` on an unknown type or list, or on a list that is not a `bool` list. |
-| `uiComponentForeignRowSourceTypeUnknown`, `uiComponentForeignRowPropertyUnknown`, `uiComponentForeignRowIdInvalid` | A `UiSource.rowProp` on an unknown type or property, or with a row id that is not letters, digits, `_`, `.` and `-`. |
+| `uiComponentForeignRowSourceTypeUnknown`, `uiComponentForeignRowPropertyUnknown`, `uiComponentForeignRowIdInvalid`, `uiComponentForeignRowSingleEntryIdMismatch` | A `UiSource.rowProp` on an unknown type or property, with a row id that is not letters, digits, `_`, `.` and `-`, or, on a single-entry type, with another row id than `expectedId`. |
 | `uiComponentConditionTooDeep` | A UI condition nested deeper than `maxDepth`. |
 | `uiComponentTemplateLabelKeyMismatch` | A `templateLabel` placeholder without a source, a source without a placeholder, or a key given twice (`direction`). |
 | `unsafeCodeTemplateOutputFileName` | A code template output name that cannot be written as a file. |
@@ -1648,3 +1799,5 @@ type, property, resource or component involved.
 | `AuthoredInstanceSpec`, `OverlayInstanceSpec`, `InstanceValues` | Instance definitions and value records. |
 | `DependencySurface`, `DependencyDomainTypeRef`, `TransformCall` | Dependency surface types and handles. |
 | `StaticBindingDirective`, `ScriptSettingOptions` | Binding helper types. |
+| `UiItemSpec<N>`, `UiConditionSpec<N>`, `UiValueSourceSpec<N>`, `UiPropertySourceSpec<N>` | What `UiItem.*`, `UiCond.*`, `UiSource.prop` and `UiSource.lit` return; `N` is the property names a source may read. Annotate a helper or variable with them ([Property names are type-checked](#property-names-are-type-checked)). |
+| `PropertyNameOf<T>` | The property names of a type definition or handle `T`, `"id"` included. |

@@ -90,48 +90,84 @@ MUST:
   for. The dependency's own UI components (`types.<Type>.uiComponents`) are generated with it, and the game places
   the Handler that holds the row they show, such as a `WalletHandler` set to the slot (`"0"`). See
   [Rows in the game](REFERENCE.md#rows-in-the-game).
-- Before adding UI to a dependency's type, read `types.<Type>.uiComponents` of its surface. Reuse a listed item instead
-  of adding one that shows the same, and give new items unlisted class names: a listed one replaces that item.
-- Give a single-entry type's row the type name in lower case as its id (`GameSettings` → `gamesettings`).
+- With `micro-economy-quest`, use its `QuestStartButton` and `ProgressCompleteButton` (surface keys `StartButton` on
+  `Quest` and `CompleteButton` on `Progress`) instead of writing Start and Complete buttons, and gate the quest list's
+  Start buttons with `ProgressIdleActiveToggle` (surface key `IdleActiveToggle` on `Progress`), or with an
+  `interactable` on `Quest` that reads the progress row `"progress"` with `UiSource.rowProp`: GS2 refuses a second
+  Start while a quest is in progress (`alreadyExists`). See [Rows in the game](REFERENCE.md#rows-in-the-game).
+- Place an `activeToggle` such as `ProgressIdleActiveToggle` on a GameObject that stays active below the type's
+  Handler, with what it shows or hides as its targets, never on a GameObject it hides: once hidden it stops listening
+  and never shows it again. See [UI components](REFERENCE.md#ui-components).
+- Before adding UI to a dependency's type, read `types.<Type>.uiComponents` of its surface. Its keys are the class
+  names items are declared with; the generated Unity class is the type's generated name followed by the key (surface
+  key `StartButton` on `Quest` → generated class `QuestStartButton`; a rename of the type changes the prefix, see
+  [Item options](REFERENCE.md#item-options)). Reuse a listed item instead of adding one that shows the same, and give
+  new items unlisted class names: a listed one replaces that item.
+- Give a single-entry type's row the type name in lower case as its id (`GameSettings` → `gamesettings`). The same id
+  is the row its Handler holds and the row id to pass to `UiSource.rowProp`. For a dependency's type, read it from
+  `types.<Type>.singleEntryRowId` of the surface, also when the surface lists no row (`micro-economy-quest`'s
+  `Progress` → `"progress"`); an overlay that renames the type keeps it. See
+  [Keys and identity](REFERENCE.md#keys-and-identity).
 - Refer to anything of another package only through `dependencyPackage(surface)` built from a surface file that
   `dsl surfaces` wrote (or, for a package you build yourself, the `dependency-surface.json` beside its ledger, which
   has the same content): `dep.type(...)`, `dep.overlay(...)`, `dep.typeId(...)`, `dep.propertyId(...)`,
   `dep.transformId(...)`, `dep.transformCall(...)`, `dep.transformProgram(...)`, `dep.resourceId(...)`. Declare the
   dependency in `definePackage({ dependencies: { [dep.packageId]: spec } })`. The spec of a package authored in the same
   project is `"*"`. An installed package has the spec of its source, as the `dependencies` of
-  `<project>/packages/<packageId>/package.json` of the package that installed it declare it: a package installed from
-  GitHub is `github:<owner>/<repo>[@<range>]` without its subdirectory, and every package of the GS2 Studio package
-  repository is `github:gs2io/gs2-studio-package`. A package that came in as a dependency of another one appears in no
-  `package.json` there: take the spec from its entry in `<project>/project-lock.json` (`github:<owner>/<repo>` for
-  `"sourceKind": "github"`). Never give an installed package `"*"`; `dsl build` refuses it and prints the spec to
-  declare (see [Dependencies](REFERENCE.md#dependencies)).
+  `<project>/packages/<packageId>/package.json` of the package that installed it declare it, range included: a package
+  installed from GitHub is `github:<owner>/<repo>[@<range>]` without its subdirectory, and every package of the GS2
+  Studio package repository is `github:gs2io/gs2-studio-package`. A package that came in as a dependency of another one
+  appears in no `package.json` there: derive the spec from its entry in `<project>/project-lock.json`
+  (`github:<owner>/<repo>` for `"sourceKind": "github"`, `npm:<packageName>@<version>` for `"sourceKind": "npm"`).
+  Never give an installed package `"*"`; `dsl build` refuses it and prints the spec to declare (see
+  [Dependencies](REFERENCE.md#dependencies)).
 - Learn what a dependency needs from its surface file, not from its package files: `types.<Type>.propertyDetails`
-  gives each property's `type`, `requirement`, `bindingHint` and, when it has one, its `display` (label and description
-  per locale); `actionTransformSignatures.<Name>` gives each transform's category and parameters (name, type,
+  gives each property's `type`, `requirement` (for `conditional`, also its `condition`, in the form `Cond` returns,
+  and `requiredWhenMet`; see [Conditions](REFERENCE.md#conditions)), `bindingHint` and, when it has
+  one, its `display` (label and description per locale); `actionTransformSignatures.<Name>` gives each transform's category and parameters (name, type,
   required and, when it has one, description); `types.<Type>.delegatedActions.<Method>.parameters` gives what a
   `UiItem.buttonAction` on that method takes as `args`; `types.<Type>.sort` gives the order of its rows, which an overlay of
   the type keeps unless it sets a `sort` other than id ascending. A `ref<T>` parameter or property takes a row id of `T`.
 - Call a dependency's transform with `dep.transformCall(name, { <parameter>: source })` (spread into an
   `actionPropertyTransforms` entry) or `dep.transformProgram(name, { <parameter>: source })` (in `actionProgram`),
   not with `dep.transformId(...)` and hand-written arguments, so `tsc` and `dsl build` check the parameter names. The
-  two name a property differently: `transformCall` takes `{ kind: "domainProperty", propertyName: "<property of the
-  row>" }`, `transformProgram` takes `{ kind: "domainProperty", source: Source.direct(...) }`. See the examples in
-  [Overlay types](REFERENCE.md#overlay-types) and [Action programs](REFERENCE.md#action-programs-and-arguments).
+  two name a property differently: write `actionPropertyTransforms: prop => [...]` and give `transformCall`
+  `prop("<property of the row>")`; `transformProgram` takes `{ kind: "domainProperty", source: Source.direct(...) }`.
+  In the `prop => [...]` form `tsc` reports a wrong `prop("x")` on `"x"`, but any other mistake in its entries (a wrong
+  `targetProperty` or `mode`) on `actionPropertyTransforms` itself, where the array form would point at the value; the
+  message's last line names it. See the examples in [Overlay types](REFERENCE.md#overlay-types) and
+  [Action programs](REFERENCE.md#action-programs-and-arguments).
 - Add the rows a dependency's type needs from the project with `instance(dep.type("<Type>"), id, values)` in
   `definePackage({ instances: [...] })`: every type a build names in `No master data is registered for domain model
   "<Type>"`. Never author a row whose id a surface lists for the same type (`shippedRowIds`,
   `shippedRowsOfDependencyTypes`): a package ships it, and a row with its id replaces it (use `overlayInstance`). Take
   the values from `types.<Type>.propertyDetails` of the surface. Give a value to every `requirement: "always"` property
   except `id` (the row id), `userData` properties and action lists
-  (`list<consumeAction>` and the other action kinds): a missing one fails the build. An action list you leave out
-  deploys as what `actionPropertyTransforms` add to it, or empty.
+  (`list<consumeAction>` and the other action kinds): a missing one fails the build. Give one also to each
+  `conditional` property with `requiredWhenMet: true` unless the row's values rule out its `condition`. An action list
+  you leave out deploys as what `actionPropertyTransforms` add to it, or empty.
+- A property or parameter of type `ref<<packageId>:<Type>>` takes a row of that package's type. Declare that package
+  as a dependency if it is not one yet (its own surface file and spec), author the row with
+  `instance(other.type("<Type>"), id, values)`, and give the row id as the value. Example, a limited-time quest:
+  `micro-economy-quest` keeps the period on `QuestCollection.schedule` (`ref<foundation-economy-schedule:Schedule>`),
+  not on `Quest`, so put the quest in a quest collection of its own with an absolute `Schedule` row, and have the game
+  list that collection too. See [A row of another package's type](REFERENCE.md#a-row-of-another-packages-type).
 - Choose each property's binding hint by what reads its value, also for a property an overlay adds: the client, from
   the rows you author (a UI component shows it) → `.assetDelivery()`; only an `actionPropertyTransforms` argument → no
   hint; a field a master data resource of this package binds → `.masterData()`. See the table in
   [Property modifiers](REFERENCE.md#property-modifiers).
-- Check the value keys of rows written with a dependency type (`instance(dep.type("Energy"), ...)`) against the
-  published property names yourself: `tsc` does not check them, and `dsl build` refuses an unknown one
-  (`unresolvedPropertySlot`).
+- Write property names as string literals where the DSL takes them. `tsc` checks each against the type it names
+  (`UiSource.prop` against the `defineUiComponent` target, `sort`, `compositeKey`, `localizedProperties`,
+  `targetProperty` and a transform argument's `prop(...)` against the type that declares them, `UiSource.rowProp`,
+  `Source.direct` and row value keys against their type), reports a wrong one on the literal itself (but see the
+  `prop => [...]` form above), and lists the names the type has. Write `UiItem` / `UiCond` / `UiSource` calls directly
+  in `defineUiComponent`'s `items`. In a variable, a helper function or a `...` spread they name no property unless
+  annotated: `function attackLabel(): UiItemSpec<PropertyNameOf<typeof Hero>>`, `const limited: UiConditionSpec<...> = ...`
+  (a name parameter of such a helper is `name: PropertyNameOf<typeof Hero>`; a helper generic in the name instead
+  passes it as the type argument: `UiItem.label<T>(className, UiSource.prop(name))`). A name typed as a plain `string`
+  does not compile; any other helper that passes one on takes `<TName extends string>(name: TName)`. A computed row value key
+  escapes `tsc`; `dsl build` still refuses it. See
+  [Property names are type-checked](REFERENCE.md#property-names-are-type-checked).
 - Regenerate surface files after a dependency changes. Never edit them by hand.
 - In master data, use `Bind.domainProperty` only in a resource mounted on a domain type, and never use
   `Bind.domainProperties` (user data only). `dsl build` accepts both mistakes; the editor and code generation refuse
@@ -155,13 +191,23 @@ MUST NOT:
 Names and ids:
 
 - You write names; GS2 Studio stores ids. The ledger maps names (tokens such as `property:Item.count`) to ids.
+- Renaming a property: rename it in `properties` first and run `tsc --noEmit`, which lists every place that still uses
+  the old name (rows, `sort`, `localizedProperties`, transform arguments, UI sources, bindings). Change each, then build
+  and move the id as below.
 - Renaming a type, property, row or transform: the build reports the old token as "not current" and the new one as
   missing, in one line that says it looks like a rename and names the id to move when it can pair them. In
-  `id-ledger.json`, move the old token's id to the new token in `random`, then build without `--write-ledger`. Never let
+  `id-ledger.json`, move the old token's id to the new token in `random`, keeping its tokens sorted (otherwise
+  `CLI_DSL_LEDGER_INVALID ... not canonical`), then build without `--write-ledger`. Never let
   `--write-ledger` record a new id for a renamed thing. Renaming a type also renames its `property:<Type>.<name>` and
   row tokens; move each of them, all before the next build. It also changes, without a message, the ids of the
   type's UI component and its items and of user data resources mounted on the type; keep them with
   `deterministicOverrides`. See [The id ledger](REFERENCE.md#the-id-ledger).
+- Renaming a UI item (its class name) changes its id the same way. Keep it in `deterministicOverrides`
+  (`"ui:<Type>:item:<NewClassName>": "<old item id>"`) so Unity scenes and prefabs keep the renamed component.
+- Renaming a property needs no change to the class names of the UI items that show it (`HpLabel` may stay after `hp`
+  becomes `health`): an item is keyed by its class name, not by the property. Rename the item
+  only if asked, and then keep its id as above; only a kept id carries the generated script's GUID over, so scenes and
+  prefabs stay wired. See [The id ledger](REFERENCE.md#the-id-ledger).
 - A row id is letters, digits, `_`, `.` and `-`, at most 128 characters; a resource that binds `id` to a GS2 name sends
   it as that name (a `micro-economy-quest` `Quest` row id is the quest model name), and some GS2 fields take fewer.
 - A row token contains the row id. Before you treat a "not current" + "missing" row token pair as a rename of a
@@ -193,16 +239,17 @@ Names and ids:
 | Map GS2 user data to properties | `defineUserDataResource({ model: GS2.svc.Model, linkedMaster?, mount?, bindings: {...}, children? })` | [User data resources](REFERENCE.md#user-data-resources) |
 | Field values | `Bind.*`, `Source.direct(T, "prop")`, `Source.parent(...)`, `transactionSettingV2()` | [Bindings](REFERENCE.md#bindings) |
 | Actions of an action entry | `ActionProgram.transform(transform, [Arg...])`; a dependency's: `dep.transformProgram(name, { count: { kind: "domainProperty", source: Source.parent(Source.direct(T, "count")) } })` | [Action programs and arguments](REFERENCE.md#action-programs-and-arguments) |
-| Add a dependency's transform to an inherited action property | `actionPropertyTransforms: [{ targetProperty, mode: "append", ...dep.transformCall(name, { count: { kind: "domainProperty", propertyName: "price" } }) }]` | [Overlay types](REFERENCE.md#overlay-types) |
+| Add a dependency's transform to an inherited action property | `actionPropertyTransforms: prop => [{ targetProperty, mode: "append", ...dep.transformCall(name, { count: prop("price") }) }]` | [Overlay types](REFERENCE.md#overlay-types) |
+| A row of another package's type (a `ref<pkg:Type>` value, such as a quest collection's schedule) | Declare that package too, `instance(other.type("Schedule"), id, values)`, pass the row id | [A row of another package's type](REFERENCE.md#a-row-of-another-packages-type) |
 | Produce GS2 actions from parameters | `defineActionTransform(name, { category, parameters, outputs })` + `OutputMap.*` | [Action transforms](REFERENCE.md#action-transforms) |
 | A method that runs a GS2 action | `delegatedActions: { Method: { targetActionKey, targetResource } }` on the type, or `definePackage({ delegatedActions: [{ target, methodName, action: { targetActionKey, targetResource } }] })` | [Delegated actions](REFERENCE.md#delegated-actions) |
 | Generated UI | `defineUiComponent(T, { items: [UiItem.label(...), UiItem.buttonAction(...)] })`, `UiSource.*`, `UiCond.*` | [UI components](REFERENCE.md#ui-components) |
-| Enable a button by another type's row (stamina, coins) | `UiItem.interactable("StartInteractable", UiCond.gte(UiSource.rowProp(energy.type("Energy"), "stamina", "currentValue"), UiSource.prop("staminaCost")))` | [Another type's row](REFERENCE.md#another-types-row) |
+| Enable a button by another type's row (stamina, coins) | `UiItem.interactable("StartInteractable", UiCond.gte(UiSource.rowProp(energy.type("Energy"), "stamina", "currentValue"), UiSource.prop("cost")))` | [Another type's row](REFERENCE.md#another-types-row) |
 | Choose a UI item and its options | `label` shows text, `templateLabel` text around values, `value` sends a typed value the game formats; a button never disables itself (add `interactable`). `{ name, description }` only label the item in GS2 Studio's editor; leave them out | [UI components](REFERENCE.md#ui-components), [Item options](REFERENCE.md#item-options) |
 | Show every row in the game, in order | A UI component describes one row; the generated `<T>ListHandler` makes one instance of a prefab per row, in the order of `sort` (an overlay: the dependency's order unless it sets a `sort` other than id ascending) | [Rows in the game](REFERENCE.md#rows-in-the-game) |
-| A button on a dependency's delegated action | `UiItem.buttonAction("StartButton", "Start", args, options)`; `args` takes only the names under `types.<T>.delegatedActions.Start.parameters` of the surface and needs each `required: true` one; with none required it may be `undefined` | [Dependencies](REFERENCE.md#dependencies) |
+| A button on a dependency's delegated action | `UiItem.buttonAction("ReceiveButton", "Receive", args, options)` (first check `types.<T>.uiComponents`, keyed by class name without the `<T>` prefix: a package may already ship the button); `args` takes only the names under `types.<T>.delegatedActions.Receive.parameters` of the surface and needs each `required: true` one; with none required it may be `undefined` | [Dependencies](REFERENCE.md#dependencies) |
 | Code template | `codeTemplates: [{ outputFileName: "File.cs", templateSource: text }]` with a `?raw` import | [Code templates](REFERENCE.md#code-templates) |
-| Use another package of the project | `dependencyPackage(surface)`, `dependencies: { [dep.packageId]: spec }`; spec `"*"` (authored in the project), or for an installed package the spec the package that installed it declares (`"github:gs2io/gs2-studio-package"` for an official package) | [Dependencies](REFERENCE.md#dependencies) |
+| Use another package of the project | `dependencyPackage(surface)`, `dependencies: { [dep.packageId]: spec }`; spec `"*"` (authored in the project), or for an installed package the spec the package that installed it declares, or for one only in `project-lock.json` the spec its entry gives (`"github:gs2io/gs2-studio-package"` for an official package) | [Dependencies](REFERENCE.md#dependencies) |
 
 ## 6. Common mistakes
 
@@ -216,11 +263,16 @@ Names and ids:
 | `CLI_DSL_EXPORT_INVALID` | Zero or several built packages exported. | Export exactly one `definePackage({...})` or `.build()` result. |
 | `{"kind":"domainTypeDefinitionNotRegistered",...}`, `{"kind":"invalidInstanceType",...}`, `{"kind":"uiComponentTargetTypeUnknown",...}` | A definition used (in a mount or binding, a row, a UI component) without being listed in `domainTypes: [...]`. | Include it in `definePackage({ domainTypes: [...] })`. |
 | `{"kind":"reservedPropertyName",...}` | A property named `id`. | Rename it; `id` exists already. |
-| `{"kind":"unresolvedPropertySlot",...}` | A misspelled or undeclared property name in values, overlay options or UI. | Use a declared or published name; the error lists both. |
-| `{"kind":"uiComponentUnknownProperty",...}` / `{"kind":"uiComponentUnknownDelegatedAction",...}` | `UiSource.prop` or `UiItem.buttonAction` names something the target lacks. | Declare the property or register the delegated action on that type. |
+| `tsc`: `Type '"x"' is not assignable to type '"a" \| "b" \| ...'`, `Argument of type '"x"' is not assignable to parameter of type '"a" \| "b" \| ...'` or `'x' does not exist in type ...`, on the name | A property name the type does not have: misspelled, or left behind by a rename. The message lists the names it has. | Use one of them; after a rename, the new name. |
+| `<where>: "x" is not a property of "T" (properties: ...)` | The same, in a name `tsc` could not check, or a build run without `tsc`. One line per place. | Use one of the listed names. |
+| `tsc`: `Type '{ ...; arguments: readonly DomainTypeTransformArgumentDef<"x">[]; ... }' is not assignable to type 'OverlayActionPropertyTransformDef<...>'`, on the `{` of an `actionPropertyTransforms` entry | A wrong property name in a `{ kind: "domainProperty", propertyName: "x" }` argument of that entry's `dep.transformCall(...)`: `tsc` cannot point inside the call. | Fix `"x"` in that entry's arguments; write them as `prop("x")` in `actionPropertyTransforms: prop => [...]`, which reports the name itself. |
+| `tsc`: `Type '(prop: ...) => ...' is not assignable to type ...` on `actionPropertyTransforms` | A wrong value in an entry of `actionPropertyTransforms: prop => [...]` other than a `prop("x")` name, such as `targetProperty` or `mode`. The last line of the message names it. | Fix that value. |
+| `tsc`: `Argument of type '"x"' is not assignable to parameter of type 'never'` on `UiSource.prop("x")` | A UI helper written in a variable, a helper function or a `...` spread instead of directly in `defineUiComponent`'s `items`, where no type gives the names. | Write it directly in `items`, or annotate the helper's return type or the variable with the component's names: `UiItemSpec<PropertyNameOf<typeof T>>`, `UiConditionSpec<...>`, `UiValueSourceSpec<...>`. A helper generic in the name passes it as the type argument: `UiItem.label<N>(className, UiSource.prop(name))`. |
+| `{"kind":"uiComponentUnknownDelegatedAction",...}` | `UiItem.buttonAction` names a method the target lacks. | Register the delegated action on that type. |
 | `{"kind":"duplicateUiComponentClassName",...}` | Two items of the same type share a class name. | Make class names unique per type. |
 | `{"kind":"uiComponentTemplateLabelKeyMismatch",...}` | `{key}` placeholders and `sources` keys differ. | Make them match one to one. |
 | `{"kind":"singleEntryInstanceIdMismatch",...,"expectedId":"..."}` | Wrong row id on a single-entry type. | Use `expectedId`. |
+| `{"kind":"uiComponentForeignRowSingleEntryIdMismatch",...,"expectedId":"..."}` | A `UiSource.rowProp` names another row of a single-entry type than its one row, which is the only row its Handler holds. | Use `expectedId` (`types.<Type>.singleEntryRowId` of the surface). |
 | `{"kind":"invalidCompositeKey","reason":"unsupportedMemberBindingHint",...}` | A key member without `masterData` / `assetDelivery`. | Add the hint. |
 | `{"kind":"invalidSortKey","reason":"notRequired",...}` | Sorting by an optional property. | Make it `.required()` or sort by `"id"`. |
 | `{"kind":"invalidBindingValue",...}` | A binding kind the resource does not accept (for example `Bind.resourceKey()` on user data), a malformed directive, or an inline schema used twice. | Read `context`; use an accepted kind. |
@@ -229,7 +281,7 @@ Names and ids:
 | `{"kind":"unresolvedParentBinding",...}` | `Source.parent(...)` on a root resource. | Use `Source.direct(...)`, or move the resource under a parent. |
 | `CLI_DSL_LEDGER_MISSING` | First build without `--write-ledger`. | Add `--write-ledger`. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `random token ... is missing from the ledger`, and no token is "not current" | You added something. | Check the tokens, then rebuild with `--write-ledger`. |
-| `CLI_DSL_LEDGER_MISMATCH` ... `looks like a rename: ... move its id "<id>" from "<old>" to "<new>"` | You renamed something, or changed a row id. | If you renamed it, move the id as the line says (a changed composite-key row id: first check it against the composite key rule). If you removed it and added another, do what the line's last sentence says. Then rebuild without `--write-ledger`. |
+| `CLI_DSL_LEDGER_MISMATCH` ... `looks like a rename: ... move its id "<id>" from "<old>" to "<new>"` | You renamed something, or changed a row id. | If you renamed it, move the id as the line says (a changed composite-key row id: first check it against the composite key rule) and rebuild without `--write-ledger`. Only if you removed it and added another: move the old token and its id to `retired`, then rebuild with `--write-ledger`. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `is not current; move it to retired` | You renamed or removed something, or changed a row id. | A changed composite-key row id: first check it against the composite key rule. Renamed: move the old token's id to the new token. Removed: move token and id to `retired`. Then rebuild without `--write-ledger`. |
 | `CLI_DSL_LEDGER_INVALID` ... `not canonical` | The ledger's key order, entry order, indentation or final newline differs from what GS2 Studio writes. | Restore that form (section 4). |
 | `CLI_DSL_VALIDATION_FAILED` ... `No master data resource binds this property.` | A `.masterData()` property no resource binds. | Bind it with `Bind.domainProperty(Source.direct(T, "prop"))` in a resource mounted on `T`, or remove the hint. |
@@ -411,3 +463,23 @@ Its `id-ledger.json` after the first `dsl build --write-ledger`:
 For dependencies, overlays, delegated actions and code templates, read the `example-gift-shop` sections of
 [REFERENCE.md](REFERENCE.md#dependencies). For an overlay that appends a dependency's transform to an inherited action
 property with `dep.transformCall`, read `example-gift-sale` in [Overlay types](REFERENCE.md#overlay-types).
+
+## 8. The game's GS2 client credentials
+
+The game signs in to GS2 with a client ID and a client secret. Take them from the project.
+
+- They are the outputs `ApplicationClientId` and `ApplicationClientSecret` of the GS2-Deploy stack `Default`, which GS2
+  creates with every project (some projects name them `ClientID` and `ClientSecret`, which GS2 Studio also reads). The
+  client has ApplicationAccess permission and is made to be embedded in the game, so the two values are low-sensitivity.
+- Never create a GS2-Identifier user or client for the game, and never put the developer's GS2 sign-in (email,
+  password, credentials file) or any other management credential into the game.
+- In Unity, they go into a `Gs2Environment` asset (Create > Game Server Services > Core > Environment) with `region`,
+  `clientId`, `clientSecret` and `name`. `Gs2ClientHolder` lists the asset under Environments, and its Active
+  Environment Name must equal the asset's `name` field, not its file name.
+- The GS2 Studio executable runs only `dsl` commands, so ask the user for the values: in GS2 Studio, they sign in to
+  GS2 and choose the destination on Publish, then press "Copy settings" under "Gs2Environment settings" on the Usage
+  tab of a table in Simple mode (Region, Client ID, Client Secret). Until GS2 Studio has read the values, it copies
+  `YOUR_CLIENT_ID` and `YOUR_CLIENT_SECRET`; never put those into the game.
+- In a checkout of the GS2 Studio repository, its development CLI (`npx vite-node cli/gs2studio.ts`) reads them:
+  `deploy outputs --stack Default --project <project> --region <region>`. It signs in with the developer's account only
+  to read them; only the two output values go into the game.
