@@ -16,8 +16,8 @@ Try these in order and use the first that works:
 1. `gs2studio --version`: the command GS2 Studio puts on PATH. The Windows installer adds it;
    on macOS and Linux the app's menu offers to install it.
 2. The install record GS2 Studio writes each time it starts: `~/.gs2studio/install.json`
-   (on Windows `%USERPROFILE%\.gs2studio\install.json`). It names the executable a terminal
-   should run. Quote the path; it usually contains spaces. Read only this file in `~/.gs2studio`:
+   (on Windows `%USERPROFILE%\.gs2studio\install.json`). Its `executable` is what a terminal
+   should run. Quote the path; it usually contains spaces (in PowerShell, prefix it with `&`). Read only this file in `~/.gs2studio`:
    the other files there hold the user's GS2 credentials.
 3. Neither: ask the user to install GS2 Studio and launch it once, then try again. Do not
    search the disk for it.
