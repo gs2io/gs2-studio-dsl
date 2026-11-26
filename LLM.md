@@ -61,8 +61,9 @@ commands below with the executable's path; the first build writes the ledger. It
    generation will do wrong or leave out. Fix each one the DSL can fix (section 6) and build again; tell the user about a
    line on another package that the DSL does not change. Then open the project in GS2 Studio and fix what it reports:
    what Unity code generation alone refuses is not printed (see
-   [Building with dsl build](REFERENCE.md#building-with-dsl-build)). A build with no such line prints
-   `project check (without Unity code generation): no errors or warnings` last.
+   [Building with dsl build](REFERENCE.md#building-with-dsl-build)). The build's last line counts the errors and
+   warnings, such as `project check (without Unity code generation): 0 error(s), 2 warning(s)`, and is
+   `project check (without Unity code generation): no errors or warnings` when there is none.
 8. Keep `id-ledger.json` and `dependency-surface.json` with `index.ts`; commit them together.
 
 A build that fails a check writes nothing. On failure, read every listed problem, fix the DSL, and rerun.
@@ -94,7 +95,9 @@ MUST:
   `Quest` and `CompleteButton` on `Progress`) instead of writing Start and Complete buttons, and gate the quest list's
   Start buttons with `ProgressIdleActiveToggle` (surface key `IdleActiveToggle` on `Progress`), or with an
   `interactable` on `Quest` that reads the progress row `"progress"` with `UiSource.rowProp`: GS2 refuses a second
-  Start while a quest is in progress (`alreadyExists`). See [Rows in the game](REFERENCE.md#rows-in-the-game).
+  Start while a quest is in progress (`alreadyExists`). A player with no quest in progress, including one who never
+  started any, still has that row, with `inProgress` `false`, so this check passes once the `ProgressHandler` has loaded.
+  See [Rows in the game](REFERENCE.md#rows-in-the-game).
 - Place an `activeToggle` such as `ProgressIdleActiveToggle` on a GameObject that stays active below the type's
   Handler, with what it shows or hides as its targets, never on a GameObject it hides: once hidden it stops listening
   and never shows it again. See [UI components](REFERENCE.md#ui-components).
@@ -187,6 +190,9 @@ MUST NOT:
   `node:*` modules or npm packages other than `gs2-studio-dsl`.
 - Attach one `defineMasterDataResource` / `defineUserDataResource` definition in two places.
 - Use one `defineInlineElement` schema for two list properties.
+- Call a generated handler's `Reload` / `ReloadAsync` / `TryReloadAsync` or `Invalidate` after an action to refresh the
+  view. Handlers and their UI components follow action results through the GS2 SDK cache. See
+  [Rows in the game](REFERENCE.md#rows-in-the-game).
 
 Names and ids:
 
@@ -280,7 +286,7 @@ Names and ids:
 | `{"kind":"resourceDefinitionAttachedTwice",...}` | One resource definition included in two places (two `children` lists, or a root and a child). | Make a second definition with its own `defineMasterDataResource` / `defineUserDataResource`. |
 | `{"kind":"unresolvedParentBinding",...}` | `Source.parent(...)` on a root resource. | Use `Source.direct(...)`, or move the resource under a parent. |
 | `CLI_DSL_LEDGER_MISSING` | First build without `--write-ledger`. | Add `--write-ledger`. |
-| `CLI_DSL_LEDGER_MISMATCH` ... `random token ... is missing from the ledger`, and no token is "not current" | You added something. | Check the tokens, then rebuild with `--write-ledger`. |
+| `CLI_DSL_LEDGER_MISMATCH` ... `random token ... is missing from the ledger; new entry ...`, and no token is "not current" | You added something. | Check the tokens, then rebuild with `--write-ledger`, which records the entries shown; do not add them by hand. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `looks like a rename: ... move its id "<id>" from "<old>" to "<new>"` | You renamed something, or changed a row id. | If you renamed it, move the id as the line says (a changed composite-key row id: first check it against the composite key rule) and rebuild without `--write-ledger`. Only if you removed it and added another: move the old token and its id to `retired`, then rebuild with `--write-ledger`. |
 | `CLI_DSL_LEDGER_MISMATCH` ... `is not current; move it to retired` | You renamed or removed something, or changed a row id. | A changed composite-key row id: first check it against the composite key rule. Renamed: move the old token's id to the new token. Removed: move token and id to `retired`. Then rebuild without `--write-ledger`. |
 | `CLI_DSL_LEDGER_INVALID` ... `not canonical` | The ledger's key order, entry order, indentation or final newline differs from what GS2 Studio writes. | Restore that form (section 4). |

@@ -1298,9 +1298,12 @@ panel itself (see [UI components](#ui-components)). Or put one in the list's ite
 `QuestStartButton` in `_activeWhenTrue`, where it reads the `ProgressHandler` above the list. To disable Start instead
 of hiding it, add an `interactable` on `Quest` whose condition includes
 `UiCond.not(UiCond.truthy(UiSource.rowProp(quest.type("Progress"), "progress", "inProgress")))` (see
-[Another type's row](#another-types-row)). Put what shows the quest in progress, with its `ProgressCompleteButton`, in
-the `_activeWhenTrue` of `ProgressRunningActiveToggle`, and put that toggle on a GameObject that stays active too, such
-as the parent of what it shows.
+[Another type's row](#another-types-row)). A player with no quest in progress, including one who never started any,
+has no GS2 progress, yet the `ProgressHandler` still holds the row, with `inProgress` `false` (the resource's
+`existenceProperty`): the condition is unknown only until the handler has loaded, and Start is enabled after that. Put
+what shows the quest in progress, with its `ProgressCompleteButton`, in the `_activeWhenTrue` of
+`ProgressRunningActiveToggle`, and put that toggle on a GameObject that stays active too, such as the parent of what it
+shows.
 
 Every list of a type is in the order of the type's sort setting (`sort` on a local type in
 [Keys and identity](#keys-and-identity), or on an overlay in [Overlay types](#overlay-types)). Rows whose keys are
@@ -1320,6 +1323,12 @@ sort: { key: "price", direction: "asc" },
 At run time, setting `Comparer` on a list handler replaces the order, and `null` restores the generated one. A list sorts
 each time it reloads its rows from GS2; when a sort key changes without a reload (a value of the player's data, for
 example), call `Resort()`.
+
+Handlers and the components below them follow action results on their own: they read the GS2 SDK cache, which the SDK
+updates from each action's result, so no `Reload` or `Invalidate` call is needed after an action. `Reload` /
+`ReloadAsync` rebuild a handler from that cache, after its runtime provider, session or binder factory changes or to
+retry after `Failed`; for a change this client cannot observe (another device's, or a server script's), `Invalidate()`
+on a `<Type>Handler` drops its row from the cache so GS2 is asked again.
 
 The game signs in to GS2 with the ApplicationAccess client of the project's `Default` GS2-Deploy stack;
 [LLM.md](LLM.md#8-the-games-gs2-client-credentials) says where to get it and where it goes in Unity.
@@ -1718,8 +1727,9 @@ writes nothing.
 
 After it saves the package, `dsl build` prints on stderr the errors and warnings `project check` reports for the
 project, as `[error] ...` and `[warning] ...` lines (`--json`: `diagnostics`). The build still exits with 0, because the
-package is saved; fix each line and build again. When there is none, the build prints `project check (without Unity code
-generation): no errors or warnings` as its last line on stdout (`--json`: `diagnostics` is `[]`):
+package is saved; fix each line and build again. Its last line on stdout counts them, such as `project check (without
+Unity code generation): 0 error(s), 2 warning(s)`, and is `project check (without Unity code generation): no errors or
+warnings` when there is none (`--json`: `diagnostics` is `[]`):
 
 | Line | Fix |
 | --- | --- |
