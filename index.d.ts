@@ -460,7 +460,147 @@ type InlineListNames<T> = T extends {
 	undefined
 ] ? never : keyof NonNullable<L> & string : never;
 export declare function dependencyPackage<S extends DependencySurface>(surface: S): DependencyPackage<S>;
+declare const PRIMITIVE_TYPES: {
+	readonly kinds: readonly ("string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp")[];
+	has(value: unknown): value is "string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp";
+};
+type PrimitiveTypeKind = (typeof PRIMITIVE_TYPES.kinds)[number];
+declare const COMPARISON_OPS: {
+	readonly kinds: readonly ("eq" | "neq" | "gt" | "gte" | "lt" | "lte")[];
+	has(value: unknown): value is "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+};
+type ComparisonOp = (typeof COMPARISON_OPS.kinds)[number];
+type EqualityComparisonOp = Extract<ComparisonOp, "eq" | "neq">;
+type OrderingComparisonOp = Exclude<ComparisonOp, EqualityComparisonOp>;
+interface AndCondition<TCondition> {
+	readonly kind: "and";
+	readonly children: readonly TCondition[];
+}
+interface OrCondition<TCondition> {
+	readonly kind: "or";
+	readonly children: readonly TCondition[];
+}
+interface NotCondition<TCondition> {
+	readonly kind: "not";
+	readonly child: TCondition;
+}
+type ConditionPropertyName = string;
+type RequirementCondition = {
+	readonly kind: EqualityComparisonOp;
+	readonly propertyName: ConditionPropertyName;
+	readonly value: string | number | boolean;
+} | {
+	readonly kind: OrderingComparisonOp;
+	readonly propertyName: ConditionPropertyName;
+	readonly value: number;
+} | {
+	readonly kind: "isSet" | "isNotSet";
+	readonly propertyName: ConditionPropertyName;
+} | AndCondition<RequirementCondition> | OrCondition<RequirementCondition> | NotCondition<RequirementCondition>;
+declare const BINDING_HINT_KINDS: {
+	readonly kinds: readonly ("none" | "masterData" | "userData" | "assetDelivery")[];
+	has(value: unknown): value is "none" | "masterData" | "userData" | "assetDelivery";
+};
+type BindingHintKind = (typeof BINDING_HINT_KINDS.kinds)[number];
+/** An instance value of `PT.localizedString`: non-empty text per locale, such as `{ ja: "森の巡回", en: "Forest Patrol" }`. */
+export type LocalizedStringValue = {
+	readonly [locale: string]: string;
+};
+type PrimitivePropertyTypeNode = {
+	readonly kind: "primitive";
+	readonly primitiveType: PrimitiveTypeKind;
+};
+type LocalizedStringPropertyTypeNode = {
+	readonly kind: "localizedString";
+};
+type EnumPropertyTypeNode = {
+	readonly kind: "enum";
+	readonly values: readonly string[];
+};
+type RefPropertyTypeNode = {
+	readonly kind: "ref";
+	readonly target: LazyDomainTypeTarget;
+};
+type InlinePropertyTypeNode = {
+	readonly kind: "inline";
+	readonly target: LazyDomainTypeTarget;
+};
+type InlineElementTypeNode = {
+	readonly kind: "inlineElement";
+	readonly schema: InlineElementDef;
+};
+type VerifyActionPropertyTypeNode = {
+	readonly kind: "verifyAction";
+};
+type ConsumeActionPropertyTypeNode = {
+	readonly kind: "consumeAction";
+};
+type AcquireActionPropertyTypeNode = {
+	readonly kind: "acquireAction";
+};
+type PropertyElementTypeNode = PrimitivePropertyTypeNode | EnumPropertyTypeNode | RefPropertyTypeNode | InlinePropertyTypeNode | VerifyActionPropertyTypeNode | ConsumeActionPropertyTypeNode | AcquireActionPropertyTypeNode;
+type ListPropertyTypeNode<TElement extends PropertyElementTypeNode | InlineElementTypeNode = PropertyElementTypeNode | InlineElementTypeNode> = {
+	readonly kind: "list";
+	readonly elementType: TElement;
+};
+type PropertyTypeNode = PropertyElementTypeNode | LocalizedStringPropertyTypeNode | ListPropertyTypeNode;
+type PropertyValueOf<T> = T extends PropertySpec<infer TValue, boolean, PropertyTypeNode> ? TValue : FileDomainPropertyValueDto;
+type IsRequiredProperty<T> = T extends PropertySpec<FileDomainPropertyValueDto, true, PropertyTypeNode, true> ? false : T extends PropertySpec<FileDomainPropertyValueDto, true, PropertyTypeNode> ? true : false;
+interface PropertySpec<TValue extends FileDomainPropertyValueDto = FileDomainPropertyValueDto, TRequired extends boolean = boolean, TNode extends PropertyTypeNode = PropertyTypeNode, TUserData extends boolean = boolean> {
+	readonly __brand: "PropertySpec";
+	readonly __value?: TValue;
+	readonly __required?: TRequired;
+	readonly __userData?: TUserData;
+	readonly type: TNode;
+	readonly requirement: FileRequirementDto;
+	readonly bindingHint?: BindingHintKind;
+	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
+	localizedDisplayOf(display: LocalizedDisplaySnapshotDto): PropertySpec<TValue, TRequired, TNode, TUserData>;
+	display(display: LocalizedDisplaySnapshotDto): PropertySpec<TValue, TRequired, TNode, TUserData>;
+	required(): PropertySpec<TValue, true, TNode, TUserData>;
+	requiredWhen(condition: RequirementCondition, requiredWhenMet?: boolean): PropertySpec<TValue, false, TNode, TUserData>;
+	optionalWhen(condition: RequirementCondition): PropertySpec<TValue, false, TNode, TUserData>;
+	masterData(): PropertySpec<TValue, TRequired, TNode, false>;
+	userData(): PropertySpec<TValue, TRequired, TNode, true>;
+	assetDelivery(): PropertySpec<TValue, TRequired, TNode, false>;
+}
+type InlineElementSpec = InlineElementTypeNode;
+export declare const PT: {
+	readonly string: () => PropertySpec<string, false, PrimitivePropertyTypeNode, false>;
+	readonly int32: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly int64: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly float32: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly float64: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
+	readonly bool: () => PropertySpec<boolean, false, PrimitivePropertyTypeNode, false>;
+	readonly timestamp: () => PropertySpec<string, false, PrimitivePropertyTypeNode, false>;
+	/** Text per locale, delivered to the client as an asset: only `.assetDelivery()` is accepted. */
+	readonly localizedString: () => PropertySpec<LocalizedStringValue, false, LocalizedStringPropertyTypeNode, false>;
+	readonly enum: <T extends string>(...values: readonly T[]) => PropertySpec<T, false, EnumPropertyTypeNode, false>;
+	readonly ref: (target: LazyDomainTypeTarget) => PropertySpec<string, false, RefPropertyTypeNode, false>;
+	readonly inline: (target: LazyDomainTypeTarget) => PropertySpec<FileDomainPropertyValueDto, false, InlinePropertyTypeNode, false>;
+	readonly inlineElement: (schema: InlineElementDef) => InlineElementSpec;
+	readonly listOf: <TElement extends PropertySpec<FileDomainPropertyValueDto, boolean, PropertyElementTypeNode> | InlineElementSpec>(element: TElement) => PropertySpec<FileDomainPropertyValueDto, false, ListPropertyTypeNode, false>;
+	readonly verifyAction: () => PropertySpec<FileDomainPropertyValueDto, false, VerifyActionPropertyTypeNode, false>;
+	readonly consumeAction: () => PropertySpec<FileDomainPropertyValueDto, false, ConsumeActionPropertyTypeNode, false>;
+	readonly acquireAction: () => PropertySpec<FileDomainPropertyValueDto, false, AcquireActionPropertyTypeNode, false>;
+};
+type ConditionScalar = string | number | boolean;
+/** The signatures refuse the shapes the stored-condition parser rejects: a non-scalar comparison value and an empty junction. */
+export declare const Cond: {
+	readonly eq: (propertyName: string, value: ConditionScalar) => RequirementCondition;
+	readonly neq: (propertyName: string, value: ConditionScalar) => RequirementCondition;
+	readonly isSet: (propertyName: string) => RequirementCondition;
+	readonly isNotSet: (propertyName: string) => RequirementCondition;
+	readonly not: (condition: RequirementCondition) => RequirementCondition;
+	readonly and: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition;
+	readonly or: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition;
+	readonly gt: (propertyName: string, value: number) => RequirementCondition;
+	readonly lt: (propertyName: string, value: number) => RequirementCondition;
+	readonly gte: (propertyName: string, value: number) => RequirementCondition;
+	readonly lte: (propertyName: string, value: number) => RequirementCondition;
+};
 type UiLiteralValue = string | number | boolean | null;
+type UiTemplateText = string | LocalizedStringValue;
 type UiImageMode = UiImageModeSnapshotDto;
 type UiTableBandEdge = "lower" | "upper";
 /**
@@ -573,7 +713,7 @@ export type UiItemSpec<TName extends string = string> = ({
 } & UiItemOptions) | ({
 	readonly kind: "templateLabel";
 	readonly componentClassName: string;
-	readonly template: string;
+	readonly template: UiTemplateText;
 	readonly sources: Readonly<Record<string, UiValueSourceSpec<TName>>>;
 	readonly fallbackText?: string;
 } & UiItemOptions);
@@ -623,7 +763,7 @@ export declare const UiItem: {
 	readonly buttonAction: <TName extends string = never>(componentClassName: string, methodName: string, args?: NoInfer<Readonly<Record<string, UiValueSourceSpec<TName>>>>, options?: UiItemOptions) => UiItemSpec<TName>;
 	readonly activeToggle: <TName extends string = never>(componentClassName: string, condition: NoInfer<UiConditionSpec<TName>>, options?: UiItemOptions) => UiItemSpec<TName>;
 	readonly interactable: <TName extends string = never>(componentClassName: string, condition: NoInfer<UiConditionSpec<TName>>, options?: UiItemOptions) => UiItemSpec<TName>;
-	readonly templateLabel: <TName extends string = never>(componentClassName: string, template: string, sources: NoInfer<Readonly<Record<string, UiValueSourceSpec<TName>>>>, options?: UiItemOptions & {
+	readonly templateLabel: <TName extends string = never>(componentClassName: string, template: UiTemplateText, sources: NoInfer<Readonly<Record<string, UiValueSourceSpec<TName>>>>, options?: UiItemOptions & {
 		readonly fallbackText?: string;
 	}) => UiItemSpec<TName>;
 };
@@ -5715,145 +5855,6 @@ interface ModelRef<S extends Gs2ServiceName = Gs2ServiceName, M extends ModelNam
 	readonly service: S;
 	readonly modelName: M;
 }
-declare const PRIMITIVE_TYPES: {
-	readonly kinds: readonly ("string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp")[];
-	has(value: unknown): value is "string" | "int32" | "int64" | "float32" | "float64" | "bool" | "timestamp";
-};
-type PrimitiveTypeKind = (typeof PRIMITIVE_TYPES.kinds)[number];
-declare const COMPARISON_OPS: {
-	readonly kinds: readonly ("eq" | "neq" | "gt" | "gte" | "lt" | "lte")[];
-	has(value: unknown): value is "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
-};
-type ComparisonOp = (typeof COMPARISON_OPS.kinds)[number];
-type EqualityComparisonOp = Extract<ComparisonOp, "eq" | "neq">;
-type OrderingComparisonOp = Exclude<ComparisonOp, EqualityComparisonOp>;
-interface AndCondition<TCondition> {
-	readonly kind: "and";
-	readonly children: readonly TCondition[];
-}
-interface OrCondition<TCondition> {
-	readonly kind: "or";
-	readonly children: readonly TCondition[];
-}
-interface NotCondition<TCondition> {
-	readonly kind: "not";
-	readonly child: TCondition;
-}
-type ConditionPropertyName = string;
-type RequirementCondition = {
-	readonly kind: EqualityComparisonOp;
-	readonly propertyName: ConditionPropertyName;
-	readonly value: string | number | boolean;
-} | {
-	readonly kind: OrderingComparisonOp;
-	readonly propertyName: ConditionPropertyName;
-	readonly value: number;
-} | {
-	readonly kind: "isSet" | "isNotSet";
-	readonly propertyName: ConditionPropertyName;
-} | AndCondition<RequirementCondition> | OrCondition<RequirementCondition> | NotCondition<RequirementCondition>;
-declare const BINDING_HINT_KINDS: {
-	readonly kinds: readonly ("none" | "masterData" | "userData" | "assetDelivery")[];
-	has(value: unknown): value is "none" | "masterData" | "userData" | "assetDelivery";
-};
-type BindingHintKind = (typeof BINDING_HINT_KINDS.kinds)[number];
-/** An instance value of `PT.localizedString`: non-empty text per locale, such as `{ ja: "森の巡回", en: "Forest Patrol" }`. */
-export type LocalizedStringValue = {
-	readonly [locale: string]: string;
-};
-type PrimitivePropertyTypeNode = {
-	readonly kind: "primitive";
-	readonly primitiveType: PrimitiveTypeKind;
-};
-type LocalizedStringPropertyTypeNode = {
-	readonly kind: "localizedString";
-};
-type EnumPropertyTypeNode = {
-	readonly kind: "enum";
-	readonly values: readonly string[];
-};
-type RefPropertyTypeNode = {
-	readonly kind: "ref";
-	readonly target: LazyDomainTypeTarget;
-};
-type InlinePropertyTypeNode = {
-	readonly kind: "inline";
-	readonly target: LazyDomainTypeTarget;
-};
-type InlineElementTypeNode = {
-	readonly kind: "inlineElement";
-	readonly schema: InlineElementDef;
-};
-type VerifyActionPropertyTypeNode = {
-	readonly kind: "verifyAction";
-};
-type ConsumeActionPropertyTypeNode = {
-	readonly kind: "consumeAction";
-};
-type AcquireActionPropertyTypeNode = {
-	readonly kind: "acquireAction";
-};
-type PropertyElementTypeNode = PrimitivePropertyTypeNode | EnumPropertyTypeNode | RefPropertyTypeNode | InlinePropertyTypeNode | VerifyActionPropertyTypeNode | ConsumeActionPropertyTypeNode | AcquireActionPropertyTypeNode;
-type ListPropertyTypeNode<TElement extends PropertyElementTypeNode | InlineElementTypeNode = PropertyElementTypeNode | InlineElementTypeNode> = {
-	readonly kind: "list";
-	readonly elementType: TElement;
-};
-type PropertyTypeNode = PropertyElementTypeNode | LocalizedStringPropertyTypeNode | ListPropertyTypeNode;
-type PropertyValueOf<T> = T extends PropertySpec<infer TValue, boolean, PropertyTypeNode> ? TValue : FileDomainPropertyValueDto;
-type IsRequiredProperty<T> = T extends PropertySpec<FileDomainPropertyValueDto, true, PropertyTypeNode, true> ? false : T extends PropertySpec<FileDomainPropertyValueDto, true, PropertyTypeNode> ? true : false;
-interface PropertySpec<TValue extends FileDomainPropertyValueDto = FileDomainPropertyValueDto, TRequired extends boolean = boolean, TNode extends PropertyTypeNode = PropertyTypeNode, TUserData extends boolean = boolean> {
-	readonly __brand: "PropertySpec";
-	readonly __value?: TValue;
-	readonly __required?: TRequired;
-	readonly __userData?: TUserData;
-	readonly type: TNode;
-	readonly requirement: FileRequirementDto;
-	readonly bindingHint?: BindingHintKind;
-	readonly localizedDisplay?: LocalizedDisplaySnapshotDto;
-	localizedDisplayOf(display: LocalizedDisplaySnapshotDto): PropertySpec<TValue, TRequired, TNode, TUserData>;
-	display(display: LocalizedDisplaySnapshotDto): PropertySpec<TValue, TRequired, TNode, TUserData>;
-	required(): PropertySpec<TValue, true, TNode, TUserData>;
-	requiredWhen(condition: RequirementCondition, requiredWhenMet?: boolean): PropertySpec<TValue, false, TNode, TUserData>;
-	optionalWhen(condition: RequirementCondition): PropertySpec<TValue, false, TNode, TUserData>;
-	masterData(): PropertySpec<TValue, TRequired, TNode, false>;
-	userData(): PropertySpec<TValue, TRequired, TNode, true>;
-	assetDelivery(): PropertySpec<TValue, TRequired, TNode, false>;
-}
-type InlineElementSpec = InlineElementTypeNode;
-export declare const PT: {
-	readonly string: () => PropertySpec<string, false, PrimitivePropertyTypeNode, false>;
-	readonly int32: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
-	readonly int64: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
-	readonly float32: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
-	readonly float64: () => PropertySpec<number, false, PrimitivePropertyTypeNode, false>;
-	readonly bool: () => PropertySpec<boolean, false, PrimitivePropertyTypeNode, false>;
-	readonly timestamp: () => PropertySpec<string, false, PrimitivePropertyTypeNode, false>;
-	/** Text per locale, delivered to the client as an asset: only `.assetDelivery()` is accepted. */
-	readonly localizedString: () => PropertySpec<LocalizedStringValue, false, LocalizedStringPropertyTypeNode, false>;
-	readonly enum: <T extends string>(...values: readonly T[]) => PropertySpec<T, false, EnumPropertyTypeNode, false>;
-	readonly ref: (target: LazyDomainTypeTarget) => PropertySpec<string, false, RefPropertyTypeNode, false>;
-	readonly inline: (target: LazyDomainTypeTarget) => PropertySpec<FileDomainPropertyValueDto, false, InlinePropertyTypeNode, false>;
-	readonly inlineElement: (schema: InlineElementDef) => InlineElementSpec;
-	readonly listOf: <TElement extends PropertySpec<FileDomainPropertyValueDto, boolean, PropertyElementTypeNode> | InlineElementSpec>(element: TElement) => PropertySpec<FileDomainPropertyValueDto, false, ListPropertyTypeNode, false>;
-	readonly verifyAction: () => PropertySpec<FileDomainPropertyValueDto, false, VerifyActionPropertyTypeNode, false>;
-	readonly consumeAction: () => PropertySpec<FileDomainPropertyValueDto, false, ConsumeActionPropertyTypeNode, false>;
-	readonly acquireAction: () => PropertySpec<FileDomainPropertyValueDto, false, AcquireActionPropertyTypeNode, false>;
-};
-type ConditionScalar = string | number | boolean;
-/** The signatures refuse the shapes the stored-condition parser rejects: a non-scalar comparison value and an empty junction. */
-export declare const Cond: {
-	readonly eq: (propertyName: string, value: ConditionScalar) => RequirementCondition;
-	readonly neq: (propertyName: string, value: ConditionScalar) => RequirementCondition;
-	readonly isSet: (propertyName: string) => RequirementCondition;
-	readonly isNotSet: (propertyName: string) => RequirementCondition;
-	readonly not: (condition: RequirementCondition) => RequirementCondition;
-	readonly and: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition;
-	readonly or: (conditions_0: RequirementCondition, ...conditions: RequirementCondition[]) => RequirementCondition;
-	readonly gt: (propertyName: string, value: number) => RequirementCondition;
-	readonly lt: (propertyName: string, value: number) => RequirementCondition;
-	readonly gte: (propertyName: string, value: number) => RequirementCondition;
-	readonly lte: (propertyName: string, value: number) => RequirementCondition;
-};
 interface CodeTemplateSnapshotDto {
 	readonly outputFileName: string;
 	readonly templateSource: string;

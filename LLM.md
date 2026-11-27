@@ -21,7 +21,7 @@ Instructions for an agent that writes or edits a GS2 Studio package DSL. Follow 
 <project>/                  GS2 Studio project (project.json, packages/)
 <dsl>/
   index.ts                  the entry: exports exactly one definePackage({...}) or .build() result
-  id-ledger.json            ids of the package; created by dsl build --write-ledger; commit it
+  id-ledger.json            ids of the package; created by dsl build --write-ledger; keep it with index.ts
   dependency-surface.json   written by dsl build: what this package publishes to packages that depend on it
   surfaces/<packageId>.json written by dsl surfaces: what each package of the project publishes
   tsconfig.json             the tsconfig from the README
@@ -64,7 +64,8 @@ commands below with the executable's path; the first build writes the ledger. It
    [Building with dsl build](REFERENCE.md#building-with-dsl-build)). The build's last line counts the errors and
    warnings, such as `project check (without Unity code generation): 0 error(s), 2 warning(s)`, and is
    `project check (without Unity code generation): no errors or warnings` when there is none.
-8. Keep `id-ledger.json` and `dependency-surface.json` with `index.ts`; commit them together.
+8. Keep `id-ledger.json` and `dependency-surface.json` with `index.ts`; under version control, commit them together.
+   Whether to use version control is the user's choice: do not create a repository unless the user asks.
 
 A build that fails a check writes nothing. On failure, read every listed problem, fix the DSL, and rerun.
 
@@ -238,6 +239,7 @@ Names and ids:
 | Choose a binding hint | `.assetDelivery()` (the client shows it), none (only a transform argument), `.masterData()` (a resource binds it) | [Property modifiers](REFERENCE.md#property-modifiers) |
 | Text shown in the player's language (a display name) | One `displayName: PT.localizedString().assetDelivery()`, rows `{ ja: "...", en: "..." }`, a `UiItem.label` on it; not one property per language | [Localized text](REFERENCE.md#localized-text) |
 | Localized text in a template or a condition | `templateLabel` placeholder and `UiCond.truthy` / `eq` / `neq` read the player's locale's translation; never `gt`/`lt`, never against a number | [Localized text](REFERENCE.md#localized-text) |
+| Fixed text and template words in the player's language (a heading, a button caption, `"{count} left"`) | `UiItem.templateLabel(className, { ja: "...", en: "..." }, sources)` with any BCP 47 locales (`zh-Hant`, `ko`, ...), every locale using the same placeholders; no placeholders and `{}` sources for fixed text. Not a hand-written localization script | [Localized templates](REFERENCE.md#localized-templates) |
 | Conditional requirement | `.requiredWhen(Cond.eq("limited", true))` | [Conditions](REFERENCE.md#conditions) |
 | Identity and order | `singleEntry: true`, `compositeKey: [...]`, `sort: { key, direction? }` | [Keys and identity](REFERENCE.md#keys-and-identity) |
 | Author rows | `instance(definition, id, values)` in `instances: [...]` | [Instances](REFERENCE.md#instances) |
@@ -281,6 +283,8 @@ Names and ids:
 | `{"kind":"uiComponentUnknownDelegatedAction",...}` | `UiItem.buttonAction` names a method the target lacks. | Register the delegated action on that type. |
 | `{"kind":"duplicateUiComponentClassName",...}` | Two items of the same type share a class name. | Make class names unique per type. |
 | `{"kind":"uiComponentTemplateLabelKeyMismatch",...}` | `{key}` placeholders and `sources` keys differ. | Make them match one to one. |
+| `{"kind":"uiComponentTemplateLabelLocaleInvalid",...,"issue":{...}}` | A template per locale with no locale, a tag that is no BCP 47 locale, one locale twice, or empty text (`issue.kind`). | Fix that locale or text. |
+| `{"kind":"uiComponentTemplateLabelLocalePlaceholderMissing",...,"locale":"en","key":"count"}` | `locale`'s template leaves out `{key}`, which another locale's template uses. | Write `{key}` in that locale's template too. |
 | `{"kind":"singleEntryInstanceIdMismatch",...,"expectedId":"..."}` | Wrong row id on a single-entry type. | Use `expectedId`. |
 | `{"kind":"uiComponentForeignRowSingleEntryIdMismatch",...,"expectedId":"..."}` | A `UiSource.rowProp` names another row of a single-entry type than its one row, which is the only row its Handler holds. | Use `expectedId` (`types.<Type>.singleEntryRowId` of the surface). |
 | `{"kind":"invalidCompositeKey","reason":"unsupportedMemberBindingHint",...}` | A key member without `masterData` / `assetDelivery`. | Add the hint. |
@@ -492,3 +496,18 @@ The game signs in to GS2 with a client ID and a client secret. Take them from th
   `"<GS2 Studio>" login` in their own terminal (your shell cannot answer its password prompt: ask the user to run it);
   only the two output values go into the game. `deploy outputs --stack Default` prints them; do not run it where the
   terminal is recorded or shared.
+
+## 9. Master data after a deploy
+
+- A deploy that changes master data (rows, rewards, costs, schedules) does not reach every player at once: GS2 caches
+  master data for up to 5 minutes. A request served by a node without the cache gets the new data right away, so a
+  player can see the new and the old values alternate for a few minutes.
+- When you check a change in the game, wait about 5 minutes before deciding it did not apply. Do not deploy again or
+  change the DSL because a new value has not shown up yet.
+- For a live game that must switch master data at a set moment for every player, GS2-Distributor fixes the master
+  data each request reads to the content at a given time: the developer's server signs that time with
+  `SignFreezeMasterDataTimestamp`, and the game passes the signed time to `FreezeMasterDataBySignedTimestamp`, which
+  returns a `Gs2Domain` that attaches the fixed version to every request it sends. Suggest it when the user needs
+  updates to take effect at a precise time; it needs a server that holds the signing key, so do not add it on your own.
+  See https://docs.gs2.io/ja/api_reference/distributor/sdk/#signfreezemasterdatatimestamp and
+  https://docs.gs2.io/ja/api_reference/distributor/game_engine/#freezemasterdatabysignedtimestamp.
